@@ -120,7 +120,7 @@ je prazna i nemaš čime da se prijaviš.
 make ports        podseti se šta je na kom portu
 ```
 
-Backend je na `http://localhost:8100`, dokumentacija na `/docs/api`. Nalog dolazi
+Backend je na `http://localhost:8000`, dokumentacija na `/docs/api`. Nalog dolazi
 iz `api/database/seeders/UserSeeder.php`:
 
 ```
@@ -138,7 +138,7 @@ uros.minic@fifthguild.com / password
 make web
 ```
 
-Vite na `http://localhost:8106`, već podešen da gađa API na 8100.
+Vite na `http://localhost:5173`, već podešen da gađa API na 8000.
 
 ### Svaki sledeći put
 
@@ -161,9 +161,9 @@ projekat tog imena. Uzmi drugo ime ili obriši stari folder. Ime je i
 `COMPOSE_PROJECT_NAME`, pa dva projekta istog imena dele kontejnere čak i iz
 različitih foldera.
 
-**Port zauzet, ili projekat uzeo blok koji već koristiš** — skeniranje vidi samo
-koren u koji upisuje. Ako držiš projekte u više foldera, zadaj `--port-base`
-ručno. `make ports` u svakom projektu kaže šta je gde.
+**`port is already allocated`** — drugi projekat je podignut na istim portovima.
+`make down` u njemu, ili napravi ovaj sa `--port-base 8100` pa mogu uporedo.
+Skripta te i pri pravljenju upozori ako nešto već sluša.
 
 **`git clone` traži lozinku** — nemaš pristup nekom od tri repoa. Traži pristup,
 ili proveri da ti je SSH ključ/token podešen za GitHub.
@@ -180,27 +180,45 @@ Vidi napomenu o `com.apple.quarantine` gore.
 
 **Jedna promenljiva imenuje sve.** `COMPOSE_PROJECT_NAME` u `api/.env` daje
 `client_hub-php-1`, `client_hub-postgres-1`, volumene `client_hub_postgres-data`
-i image `client_hub/php:local`. Zato dva projekta mogu da rade uporedo.
+i image `client_hub/php:local`. Zato dva projekta ne mogu da se pregaze — svaki
+ima svoje kontejnere, svoje volumene i svoju mrežu.
 
-**Jedan broj daje portove.** Svaki projekat dobija blok od deset, počev od 8100:
+**Portovi su svuda isti.** Svaki projekat koristi iste, poznate brojeve:
 
 | | |
 | --- | --- |
-| `base` | API |
-| `base+1` | postgres |
-| `base+2` | test baza |
-| `base+3` | redis |
-| `base+4` | Grafana |
-| `base+5` | Alloy |
-| `base+6` | Vite |
+| `localhost:8000` | Laravel API (`/docs/api`, `/horizon`, `/pulse`) |
+| `localhost:5173` | Vite, frontend |
+| `localhost:5433` | postgres |
+| `localhost:5434` | test baza |
+| `localhost:6379` | redis |
+| `localhost:3000` | Grafana (`make observe`) |
 
-Blok se bira automatski — preskaču se i portovi na kojima nešto sluša i blokovi
-koje je uzeo neki susedni projekat. Ugašen projekat ne drži nijedan socket, a i
-dalje polaže pravo na svoj blok, pa se gleda i `Makefile` susednih projekata.
+Skripta ih ne dira — to su defaulti iz samog templatea. Postgres je na 5433 a ne
+5432 namerno, jer je 5432 najčešće zauzet lokalnom instalacijom.
 
-**Zato drži sve projekte pod jednim korenom.** Skeniranje vidi samo folder u
-koji upisuje; projekat u drugom korenu mu je nevidljiv i blok može da se dodeli
-dvaput. Ako ih ipak razdvajaš, zadaj `--port-base` ručno.
+**Zato možeš da radiš na jednom projektu u datom trenutku.** Ime projekta
+razdvaja kontejnere i podatke, ali port na hostu drži tačno jedan proces na celoj
+mašini. Ako pokreneš drugi projekat dok prvi radi, `docker compose` javi:
+
+```
+Error: Bind for 0.0.0.0:8000 failed: port is already allocated
+```
+
+Glasno i bezopasno — ništa se ne pokvari, samo se ne digne. Rešenje je `make
+down` u onom drugom.
+
+**Kad ti stvarno trebaju dva uporedo**, drugom pri pravljenju daj `--port-base`:
+
+```
+./new-project.sh acme --port-base 8100
+```
+
+Dobija blok od deset: API `8100`, postgres `8101`, test baza `8102`, redis
+`8103`, Grafana `8104`, Alloy `8105`, Vite `8106`. Isti raspored za bilo koju
+bazu, pa je `base+6` uvek frontend.
+
+`make ports` u svakom projektu ispiše šta je gde, pa nema šta da se pamti.
 
 ---
 
@@ -208,7 +226,7 @@ dvaput. Ako ih ipak razdvajaš, zadaj `--port-base` ručno.
 
 | | |
 | --- | --- |
-| `--port-base N` | ručno zadaj blok umesto automatskog |
+| `--port-base N` | pomeri portove u blok od deset odavde — za dva projekta uporedo |
 | `--dir PATH` | gde se pravi folder; jače od `$PROJECTS_DIR`, preskače prompt |
 | `--no-infra` | preskoči infra repo — kad projekat ide na server koji ga već vrti |
 | `--setup` | i sagradi kontejnere, migriraj, instaliraj `node_modules` |

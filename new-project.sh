@@ -31,9 +31,10 @@
 #     web/          the Vue frontend, .env written for this project
 #     infra/        the shared server stack (see the note under --no-infra)
 #
-# Every container, volume and image is named after the project, so two client
-# projects can run side by side without touching each other. That is one
-# variable -- COMPOSE_PROJECT_NAME in api/.env -- plus a block of host ports.
+# Every container, volume and image is named after the project, so projects
+# cannot overwrite each other's data. That is one variable --
+# COMPOSE_PROJECT_NAME in api/.env. Host ports are the one thing a project name
+# cannot separate, which is what --port-base is for.
 #
 # It creates files and nothing else. No container is built or started and none
 # of the three folders is a git repository: the templates are cloned for their
@@ -52,8 +53,14 @@ API_REPO="${API_REPO:-https://github.com/dev-uros/laravel-backend-ai-setup.git}"
 WEB_REPO="${WEB_REPO:-https://github.com/dev-uros/vue-front-ai-setup.git}"
 INFRA_REPO="${INFRA_REPO:-https://github.com/dev-uros/infra-ai-setup.git}"
 
-# Offsets from the project's port base. One number per project, everything else
-# derived from it -- there is no second list to keep in sync.
+# Ports. By default a project keeps the template's own defaults -- 8000 for the
+# API, 5173 for Vite, 5433/5434 for Postgres, 6379 for Redis -- so every project
+# sits on the same, memorable numbers and the script writes no port at all.
+#
+# That works because one project runs at a time. Two at once cannot share a host
+# port: the second `docker compose up` fails with "port is already allocated",
+# loudly and harmlessly. --port-base moves one of them out of the way, offsets
+# below, ten ports to a block.
 OFFSET_APP=0        # nginx (the API)
 OFFSET_DB=1         # postgres
 OFFSET_DB_TEST=2    # postgres-test
@@ -62,9 +69,6 @@ OFFSET_GRAFANA=4    # grafana   (make observe)
 OFFSET_ALLOY=5      # alloy     (make observe)
 OFFSET_VITE=6       # vite dev server (the frontend)
 PORT_SPAN=10        # ports reserved per project, so bases step by 10
-
-PORT_BASE_START=8100
-PORT_BASE_MAX=8900
 
 name=""
 port_base=""
@@ -139,8 +143,10 @@ usage() {
     [name]              lowercase, digits and underscores: client_hub.
                         Asked for when omitted.
 
-    --port-base N       first host port for this project (default: first free
-                        block from 8100, stepping by 10)
+    --port-base N       move this project's ports into a block of ten
+                        starting here, for the rare case of two projects
+                        running at once. By default it keeps the template's
+                        own ports: API 8000, Vite 5173, Postgres 5433.
     --dir PATH          where the project folder is created, asked for when
                         omitted. $PROJECTS_DIR sets the answer permanently;
                         the default is ~/Desktop/fg-projects
@@ -234,7 +240,7 @@ if [ -d "$dir" ] && [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
     die "there is already a project called '$name' in $parent_dir -- pick another name, or remove $dir first"
 fi
 
-# --- port block --------------------------------------------------------------
+# --- ports -------------------------------------------------------------------
 
 # True when nothing is listening. Uses bash's own /dev/tcp so the script needs
 # no nc, lsof or ss -- their flags differ between macOS and Linux.
@@ -242,41 +248,9 @@ port_free() {
     ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
 }
 
-# Every port of the block has to be free AND unclaimed. Listening sockets are
-# not enough on their own: a project that is merely stopped has no sockets, and
-# handing its block to the next project is a collision that only shows up the
-# day someone starts both.
-block_free() {
-    local base=$1 offset
-    for offset in $OFFSET_APP $OFFSET_DB $OFFSET_DB_TEST $OFFSET_REDIS $OFFSET_GRAFANA $OFFSET_ALLOY $OFFSET_VITE; do
-        port_free $((base + offset)) || return 1
-    done
-    ! printf '%s\n' "$claimed" | grep -qx "$base"
-}
-
-# Port bases of the projects already sitting next to this one. Their generated
-# Makefile is the record -- there is no registry file to lose or to forget to
-# update when a project is deleted.
-claimed=$(grep -hE '^APP_PORT[[:space:]]*:=' "$parent_dir"/*/Makefile 2>/dev/null | tr -dc '0-9\n' || true)
-
 if [ -n "$port_base" ]; then
     printf '%s' "$port_base" | grep -qE '^[0-9]+$' || die "--port-base must be a number"
-    block_free "$port_base" || say "warning: ${port_base}-$((port_base + PORT_SPAN - 1)) is already listening or claimed by another project"
-else
-    port_base=""
-    for candidate in $(seq $PORT_BASE_START $PORT_SPAN $PORT_BASE_MAX); do
-        if block_free "$candidate"; then port_base=$candidate; break; fi
-    done
-    [ -n "$port_base" ] || die "no free port block between $PORT_BASE_START and $PORT_BASE_MAX -- pass --port-base"
 fi
-
-app_port=$((port_base + OFFSET_APP))
-db_port=$((port_base + OFFSET_DB))
-db_test_port=$((port_base + OFFSET_DB_TEST))
-redis_port=$((port_base + OFFSET_REDIS))
-grafana_port=$((port_base + OFFSET_GRAFANA))
-alloy_port=$((port_base + OFFSET_ALLOY))
-vite_port=$((port_base + OFFSET_VITE))
 
 # --- target directory --------------------------------------------------------
 
@@ -288,7 +262,7 @@ mkdir -p "$dir" || die "cannot create $dir"
 title=$(printf '%s' "$name" | tr '_-' '  ' | awk '{for (i = 1; i <= NF; i++) $i = toupper(substr($i, 1, 1)) substr($i, 2); print}')
 
 printf '\n  %s  (%s)\n' "$title" "$name"
-printf '  %s\n  ports %s-%s\n\n' "$dir" "$port_base" "$((port_base + PORT_SPAN - 1))"
+printf '  %s\n\n' "$dir"
 
 # --- clone -------------------------------------------------------------------
 
@@ -332,21 +306,63 @@ set_env() {
 say "writing api/.env"
 cp "$dir/api/.env.example" "$dir/api/.env"
 
+# Reads a value back out of the file just written. With no --port-base the
+# template's own defaults are kept and no port is written at all, so this is
+# what tells the Makefile and the summary below which numbers the project ended
+# up on -- rather than a second copy of those defaults, kept in this script,
+# quietly going stale the day the template moves one.
+read_env() { sed -n "s/^$1=//p" "$dir/api/.env" | tail -n1; }
+
+if [ -n "$port_base" ]; then
+    app_port=$((port_base + OFFSET_APP))
+    db_port=$((port_base + OFFSET_DB))
+    db_test_port=$((port_base + OFFSET_DB_TEST))
+    redis_port=$((port_base + OFFSET_REDIS))
+    grafana_port=$((port_base + OFFSET_GRAFANA))
+    alloy_port=$((port_base + OFFSET_ALLOY))
+    vite_port=$((port_base + OFFSET_VITE))
+
+    set_env APP_PORT             "$app_port"                   "$dir/api/.env"
+    set_env FORWARD_DB_PORT      "$db_port"                    "$dir/api/.env"
+    set_env FORWARD_TEST_DB_PORT "$db_test_port"               "$dir/api/.env"
+    set_env FORWARD_REDIS_PORT   "$redis_port"                 "$dir/api/.env"
+    set_env GRAFANA_PORT         "$grafana_port"               "$dir/api/.env"
+    set_env ALLOY_PORT           "$alloy_port"                 "$dir/api/.env"
+    # Where the emailed activation and reset links point, and the one origin
+    # CORS lets into the API from a browser.
+    set_env FRONTEND_URL         "http://localhost:$vite_port"  "$dir/api/.env"
+else
+    app_port=$(read_env APP_PORT)
+    db_port=$(read_env FORWARD_DB_PORT)
+    db_test_port=$(read_env FORWARD_TEST_DB_PORT)
+    redis_port=$(read_env FORWARD_REDIS_PORT)
+    grafana_port=$(read_env GRAFANA_PORT)
+    alloy_port=$(read_env ALLOY_PORT)
+    # The frontend has no port variable of its own -- VITE_API_URL is its only
+    # one, by its own rule -- so the dev server's port lives in the API's
+    # FRONTEND_URL, which is the one place the two halves have to agree.
+    vite_port=$(read_env FRONTEND_URL | sed 's|.*:||')
+fi
+
+set_env APP_URL "http://localhost:$app_port" "$dir/api/.env"
+
 # The one line that renames every container, volume and image of this stack.
-set_env COMPOSE_PROJECT_NAME "$name"                          "$dir/api/.env"
-set_env APP_NAME             "\"$title\""                     "$dir/api/.env"
-set_env APP_URL              "http://localhost:$app_port"      "$dir/api/.env"
-# Where the emailed activation and reset links point, and the one origin CORS
-# lets into the API from a browser.
-set_env FRONTEND_URL         "http://localhost:$vite_port"     "$dir/api/.env"
-set_env DB_DATABASE          "$name"                           "$dir/api/.env"
-set_env DB_USERNAME          "$name"                           "$dir/api/.env"
-set_env APP_PORT             "$app_port"                       "$dir/api/.env"
-set_env FORWARD_DB_PORT      "$db_port"                        "$dir/api/.env"
-set_env FORWARD_TEST_DB_PORT "$db_test_port"                   "$dir/api/.env"
-set_env FORWARD_REDIS_PORT   "$redis_port"                     "$dir/api/.env"
-set_env GRAFANA_PORT         "$grafana_port"                   "$dir/api/.env"
-set_env ALLOY_PORT           "$alloy_port"                     "$dir/api/.env"
+set_env COMPOSE_PROJECT_NAME "$name"          "$dir/api/.env"
+set_env APP_NAME             "\"$title\""     "$dir/api/.env"
+set_env DB_DATABASE          "$name"          "$dir/api/.env"
+set_env DB_USERNAME          "$name"          "$dir/api/.env"
+
+# Warn, never refuse. Something listening here is almost always another project
+# still up, which `make down` fixes -- and a wrong guess must not stop a project
+# from being created.
+busy=""
+for p in "$app_port" "$db_port" "$db_test_port" "$redis_port" "$vite_port"; do
+    port_free "$p" || busy="$busy $p"
+done
+if [ -n "$busy" ]; then
+    say "warning: something is already listening on:$busy"
+    say "another project is probably running -- \`make down\` there, or pass --port-base"
+fi
 
 say "writing web/.env"
 cp "$dir/web/.env.example" "$dir/web/.env"
