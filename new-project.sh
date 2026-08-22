@@ -38,7 +38,7 @@
 # It creates files and nothing else. No container is built or started and none
 # of the three folders is a git repository: the templates are cloned for their
 # contents and the .git directory is dropped, so a project starts with no
-# history and no remotes. Run `make setup` when you want it up, and `git init`
+# history and no remotes. Run `make init` when you want it up, and `git init`
 # in each folder when you are ready to put it somewhere.
 #
 # The trade: a fix made in a template later cannot be merged into a project made
@@ -147,7 +147,8 @@ usage() {
     --no-infra          skip the infra repo -- correct when this project will be
                         deployed onto a server that already runs it
     --setup             also build the containers, migrate and install the
-                        frontend dependencies. Off by default: creating a
+                        frontend dependencies -- the same as `make init`.
+                        Off by default: creating a
                         project is quick, booting it is not.
 
 USAGE
@@ -369,10 +370,15 @@ say "writing Makefile"
     cat <<'MAKEFILE'
 .DEFAULT_GOAL := help
 
-.PHONY: setup
-setup: ## First run: build the images, boot, install deps, migrate
+.PHONY: init
+init: ## First run: boot, migrate, seed the first user, install frontend deps
 	@$(MAKE) -C api setup
+	@$(MAKE) -C api artisan c="db:seed --force"
 	cd web && npm install
+	@echo ""
+	@echo "  the first administrator is seeded by"
+	@echo "  api/database/seeders/UserSeeder.php -- password: password"
+	@echo ""
 
 .PHONY: up
 up: ## Start the API stack (postgres, redis, php, horizon, scheduler, nginx)
@@ -423,23 +429,17 @@ MAKEFILE
 
 if [ "$run_setup" -eq 1 ] && ! command -v make >/dev/null; then
     say "make not found -- skipping the build"
-    say "install make, then run: make -C \"$dir/api\" setup"
+    say "install make, then run: make -C \"$dir\" init"
     run_setup=0
 fi
 
 if [ "$run_setup" -eq 1 ]; then
     printf '\n'
-    say "building and booting the API (this takes a few minutes the first time)"
+    say "building, booting, migrating and seeding (a few minutes the first time)"
     printf '\n'
-    make -C "$dir/api" setup
-
-    if command -v npm >/dev/null; then
-        printf '\n'
-        say "installing frontend dependencies"
-        (cd "$dir/web" && npm install --silent)
-    else
-        say "npm not found -- run 'npm install' in web/ yourself"
-    fi
+    # The generated Makefile owns the order of these steps, so --setup and a
+    # later `make init` cannot drift apart.
+    make -C "$dir" init
 fi
 
 # --- what to do next ---------------------------------------------------------
@@ -448,7 +448,7 @@ if [ "$run_setup" -eq 1 ]; then
     booted="    make ports          what is on which port
     make web            start the frontend"
 else
-    booted="    make setup          build and boot it (a few minutes, first time only)
+    booted="    make init           boot it, migrate and seed (first time, a few minutes)
     make ports          what is on which port"
 fi
 
@@ -473,7 +473,10 @@ $booted
     cd api && git init && git add -A && git commit -m "Initial commit"
     git branch -M main && git remote add origin <url> && git push -u origin main
 
-  Once it is up, create the first administrator:
+  \`make init\` seeds the first administrator -- the address and the
+  development password are in api/database/seeders/UserSeeder.php, and
+  editing that file before the first run is how you change them. For a
+  real address on a real server, once SMTP works:
 
     make -C api artisan c="admin:create you@example.com --name=... --surname=..."
   ------------------------------------------------------------------
