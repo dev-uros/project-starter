@@ -46,6 +46,10 @@ logiku, samo prosleđuje argumente.
 ./new-project.sh client_hub --dir ~/Desktop/fg-projects
 ```
 
+**Ime** sme da ima mala slova, cifre i `_`, i počinje slovom: `client_hub`, ne
+`client-hub` ni `ClientHub`. Ime postaje i ime baze i korisnika u Postgresu, gde
+crtica traži navodnike u svakom SQL-u.
+
 ---
 
 ## Šta dobiješ
@@ -166,7 +170,12 @@ različitih foldera.
 Skripta te i pri pravljenju upozori ako nešto već sluša.
 
 **`git clone` traži lozinku** — nemaš pristup nekom od tri repoa. Traži pristup,
-ili proveri da ti je SSH ključ/token podešen za GitHub.
+ili proveri da ti je SSH ključ/token podešen za GitHub. Ako clone pukne, skripta
+obriše polovičan projekat, pa posle samo pusti istu komandu ponovo.
+
+**`booting it failed`** posle `--setup` — fajlovi su napravljeni i ostaju, samo
+dizanje nije uspelo (najčešće Docker ne radi). Popravi uzrok pa `make init` u
+folderu projekta.
 
 **Dvoklik javlja „unidentified developer"** — skinuo si ZIP umesto `git clone`.
 Vidi napomenu o `com.apple.quarantine` gore.

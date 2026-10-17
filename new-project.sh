@@ -17,16 +17,13 @@
 # reused. Both prompts are skipped when there is no terminal to answer them, so
 # the script still works from another script or a CI job.
 #
-# The path also decides which projects the port-block scan can see, so keep
-# every project under one root unless you pass --port-base by hand.
-#
 # Portability: bash, git, docker and the usual POSIX tools. No GNU-only flags,
 # no realpath, no sed -i -- it runs on macOS, Linux and Git Bash on Windows.
 #
 # What it produces:
 #
 #   ~/Desktop/fg-projects/client_hub/
-#     Makefile      knows this project's port block; `make up`, `make web`, `make ports`
+#     Makefile      knows this project's ports; `make up`, `make web`, `make ports`
 #     api/          the Laravel backend, .env written for this project
 #     web/          the Vue frontend, .env written for this project
 #     infra/        the shared server stack (see the note under --no-infra)
@@ -37,15 +34,18 @@
 # cannot separate, which is what --port-base is for.
 #
 # It creates files and nothing else. No container is built or started and none
-# of the three folders is a git repository: the templates are cloned for their
+# of the folders is a git repository: the templates are cloned for their
 # contents and the .git directory is dropped, so a project starts with no
 # history and no remotes. Run `make init` when you want it up, and `git init`
 # in each folder when you are ready to put it somewhere.
 #
+# If anything fails before the project is complete -- a clone without access,
+# a template missing a file -- what this run created is removed again, so the
+# same name can simply be tried again.
+#
 # The trade: a fix made in a template later cannot be merged into a project made
 # from it -- the two have no common ancestor, so `git merge` would conflict on
-# every file. Copy the change, or pass --setup and keep the clones' history by
-# hand if a project needs to track the template.
+# every file. Copy the change instead.
 
 set -euo pipefail
 
@@ -140,13 +140,15 @@ usage() {
 
   usage: new-project.sh [name] [options]
 
-    [name]              lowercase, digits and underscores: client_hub.
+    [name]              lowercase letters, digits and underscores, starting
+                        with a letter: client_hub.
                         Asked for when omitted.
 
     --port-base N       move this project's ports into a block of ten
                         starting here, for the rare case of two projects
                         running at once. By default it keeps the template's
                         own ports: API 8000, Vite 5173, Postgres 5433.
+                        Between 1024 and 65526.
     --dir PATH          where the project folder is created, asked for when
                         omitted. $PROJECTS_DIR sets the answer permanently;
                         the default is ~/Desktop/fg-projects
@@ -169,11 +171,20 @@ if [ $# -eq 0 ] && [ ! -t 0 ]; then
     exit 1
 fi
 
+# An option at the end of the line, or followed by another option, has no value.
+# Without this check `shift 2` fails under `set -e` and the script ends with no
+# message at all.
+need_value() {
+    case "${2:-}" in
+        ""|-*) die "$1 needs a value" ;;
+    esac
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         -h|--help)   usage; exit 0 ;;
-        --port-base) port_base="${2:-}"; shift 2 ;;
-        --dir)       parent_dir="${2:-}"; shift 2 ;;
+        --port-base) need_value "$@"; port_base=$2; shift 2 ;;
+        --dir)       need_value "$@"; parent_dir=$2; shift 2 ;;
         --no-infra)  with_infra=0; shift ;;
         --setup)     run_setup=1; shift ;;
         --no-setup)  run_setup=0; shift ;;   # accepted, and now the default
@@ -189,16 +200,17 @@ command -v docker >/dev/null || die "docker is not installed"
 
 # --- the name ----------------------------------------------------------------
 
-# Docker Compose accepts lowercase letters, digits, underscore and hyphen, and
-# the name must start with a letter. An uppercase letter here fails much later,
-# inside compose, with a message that does not mention this script.
-name_ok() { printf '%s' "$1" | grep -qE '^[a-z][a-z0-9_-]*$'; }
+# Docker Compose wants lowercase and a leading letter; an uppercase letter here
+# fails much later, inside compose, with a message that does not mention this
+# script. Compose would take a hyphen too, but the name is also the Postgres
+# database and user, where a hyphen has to be quoted in every piece of SQL.
+name_ok() { printf '%s' "$1" | grep -qE '^[a-z][a-z0-9_]*$'; }
 
 while ! name_ok "$name"; do
-    [ -z "$name" ] || say "'$name' will not do: lowercase letters, digits, _ and -, starting with a letter"
+    [ -z "$name" ] || say "'$name' will not do: lowercase letters, digits and _, starting with a letter"
     # `|| die` rather than a bare read: on Ctrl-D read returns non-zero, and
     # under `set -e` that would end the script silently, mid-sentence.
-    [ -t 0 ] || die "give a project name (lowercase letters, digits, _ and -)"
+    [ -t 0 ] || die "give a project name (lowercase letters, digits and _)"
     printf '\n  project name?\n  > '
     read -r name || { printf '\n'; die "cancelled"; }
 done
@@ -248,11 +260,38 @@ port_free() {
     ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
 }
 
+# A host port is 1..65535, and below 1024 docker needs root on Linux. A leading
+# zero is refused too: bash arithmetic would read 08100 as octal.
+port_ok() {
+    printf '%s' "$1" | grep -qE '^[1-9][0-9]*$' && [ "$1" -le 65535 ]
+}
+
 if [ -n "$port_base" ]; then
-    printf '%s' "$port_base" | grep -qE '^[0-9]+$' || die "--port-base must be a number"
+    max_base=$((65535 - PORT_SPAN + 1))
+    { port_ok "$port_base" && [ "$port_base" -ge 1024 ] && [ "$port_base" -le "$max_base" ]; } ||
+        die "--port-base must be a number between 1024 and $max_base"
 fi
 
 # --- target directory --------------------------------------------------------
+
+# Until the project is complete, a failure removes what this run created. A
+# half-cloned folder would otherwise block the next run with "already a project
+# called ...". Only the paths this script writes are removed, and the folder
+# itself only when this run created it -- an empty one made by hand stays.
+dir_created=0
+[ -d "$dir" ] || dir_created=1
+finished=0
+
+cleanup() {
+    [ "$finished" -eq 0 ] || return 0
+    rm -rf "$dir/api" "$dir/web" "$dir/infra" "$dir/Makefile"
+    [ "$dir_created" -eq 0 ] || rmdir "$dir" 2>/dev/null || true
+    printf '  removed the unfinished project, %s\n\n' "$dir" >&2
+}
+trap cleanup EXIT
+# The EXIT trap alone is not enough for Ctrl-C everywhere; exiting explicitly
+# makes the trap run on every bash this supports.
+trap 'exit 130' INT TERM
 
 # The root was checked and created above; $dir is absolute because $parent_dir
 # is, and the name has already been proved free.
@@ -341,7 +380,18 @@ else
     # The frontend has no port variable of its own -- VITE_API_URL is its only
     # one, by its own rule -- so the dev server's port lives in the API's
     # FRONTEND_URL, which is the one place the two halves have to agree.
-    vite_port=$(read_env FRONTEND_URL | sed 's|.*:||')
+    vite_port=$(read_env FRONTEND_URL | sed -E 's|^.*:([0-9]+)/?$|\1|')
+
+    # Read, not written, so a template that renames or drops one of these keys
+    # would otherwise produce a Makefile with an empty port -- and a `make web`
+    # that fails far from the cause.
+    for pair in "APP_PORT=$app_port" "FORWARD_DB_PORT=$db_port" \
+                "FORWARD_TEST_DB_PORT=$db_test_port" "FORWARD_REDIS_PORT=$redis_port" \
+                "GRAFANA_PORT=$grafana_port" "ALLOY_PORT=$alloy_port" \
+                "FRONTEND_URL=$vite_port"; do
+        port_ok "${pair#*=}" ||
+            die "api/.env.example has no usable ${pair%%=*} (found '${pair#*=}') -- has the template renamed it?"
+    done
 fi
 
 set_env APP_URL "http://localhost:$app_port" "$dir/api/.env"
@@ -441,6 +491,10 @@ help: ## Show this help
 MAKEFILE
 } > "$dir/Makefile"
 
+# Every file is in place. From here on a failure -- in the build below -- leaves
+# a complete project that only needs booting, so it is kept.
+finished=1
+
 # --- first run ---------------------------------------------------------------
 
 if [ "$run_setup" -eq 1 ] && ! command -v make >/dev/null; then
@@ -455,7 +509,8 @@ if [ "$run_setup" -eq 1 ]; then
     printf '\n'
     # The generated Makefile owns the order of these steps, so --setup and a
     # later `make init` cannot drift apart.
-    make -C "$dir" init
+    make -C "$dir" init ||
+        die "$title was created, but booting it failed -- fix the error above, then run: make -C \"$dir\" init"
 fi
 
 # --- what to do next ---------------------------------------------------------
@@ -483,7 +538,7 @@ $booted
   Containers are named ${name}-php-1, ${name}-postgres-1, and so on,
   so this project cannot collide with another one on this machine.
 
-  None of the three folders is a git repository yet. When you have
+  None of the folders is a git repository yet. When you have
   somewhere to push each one:
 
     cd api && git init && git add -A && git commit -m "Initial commit"
