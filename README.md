@@ -57,6 +57,8 @@ crtica traži navodnike u svakom SQL-u.
 
 ```
 fg-projects/client_hub/
+  CLAUDE.md, .mcp.json, .claude/
+                Claude Code iz root-a zna sve foldere (vidi ispod)
   Makefile      zna portove ovog projekta: make setup, make up, make web, make ports
   api/          Laravel backend, .env napisan za ovaj projekat
   web/          Vue frontend, .env napisan za ovaj projekat
@@ -65,6 +67,25 @@ fg-projects/client_hub/
                 Expo aplikacija za interne korisnike, .env.local gađa ovaj
                 API (preskače se sa --no-mobile)
 ```
+
+**Claude Code se pokreće iz root-a projekta.** `claude` u `client_hub/` i
+samo kažeš šta treba — root `CLAUDE.md` je mapa foldera i za svaki kaže koji
+fajl s pravilima da pročita pre izmene (`api/CLAUDE.md` + `.ai/rules`,
+`web/AGENTS.md`, `internal-mobile-app/AGENTS.md`). Claude Code čita
+`.mcp.json` i `.claude/` samo iz foldera u kom je sesija pokrenuta, pa ih
+root dobija svoje:
+
+- `.mcp.json` — MCP serveri svih template-a na jednom mestu: laravel-boost
+  (radi u `php` kontejneru, treba `make up`), nuxt-ui, zod, playwright i
+  maestro za mobilni.
+- `.claude/skills/` — symlinkovi na skillove iz `api/`, `web/` i
+  `internal-mobile-app/`. Skill se menja u folderu kome pripada.
+- `.claude/settings.json` — uključen Expo plugin.
+
+Serveri su upisani u skripti, ne spojeni iz template-a. Kad neki template
+dobije nov MCP server, skripta to javi upozorenjem — tad ga dodaj u
+`new-project.sh`. Sesija pokrenuta u jednom folderu i dalje radi, ali tad
+dobija samo alate tog foldera.
 
 **Pravi samo fajlove.** Nijedan kontejner se ne gradi ni ne diže. Traje par
 sekundi. Kad hoćeš da ga digneš — vidi *Prvi put, korak po korak* ispod:
@@ -173,10 +194,24 @@ i restartuj Metro; telefon i Mac moraju biti na istom Wi-Fi-ju. Detalji u
 `internal-mobile-app/README.md`. Sve ostalo — struktura, testovi,
 Maestro flowovi — je u `internal-mobile-app/README.md` i `AGENTS.md`.
 
-**Push obaveštenja** su podržana do kraja (backend, aplikacija, testovi), ali
-nisu vezana ni za čiji nalog: Expo projekat, Firebase i Apple APNs ključ se
-podešavaju po projektu, kad klijent ima naloge. Uputstvo korak po korak:
-`internal-mobile-app/docs/push-notifications.md`.
+#### Nalozi koje mobilna aplikacija traži po projektu
+
+Template nije vezan ni za čiji nalog. Sve radi lokalno bez njih, ali za
+sledeće stvari projekat mora da ima **svoje** naloge, najbolje na klijentovu ili
+firminu organizaciju, nikad lične:
+
+| Nalog | Za šta | Bez njega | Uputstvo |
+| --- | --- | --- | --- |
+| **Expo** (organizacija na expo.dev) | EAS build-ovi, push token | nema push-a ni EAS build-a | `docs/push-notifications.md` |
+| **Firebase** projekat (besplatan) | push na Androidu | Android ne dobija push | `docs/push-notifications.md` |
+| **Apple Developer** (plaćen) | push na iOS-u, TestFlight, App Store | iOS ne dobija push, nema distribucije | `docs/push-notifications.md` |
+| **Sentry** (besplatan plan: 5.000 grešaka mesečno) | prijave padova i grešaka iz release build-ova | aplikacija radi, ali greške korisnika ne vidi niko | `docs/sentry.md` |
+
+Putanje su u `internal-mobile-app/`. Push je podržan do kraja (backend,
+aplikacija, testovi), a Sentry je ugrađen i ćuti dok su
+`EXPO_PUBLIC_SENTRY_DSN`, `SENTRY_ORG` i `SENTRY_PROJECT` prazni — oba čekaju
+samo naloge. Tajne (Sentry auth token, Firebase service account, APNs ključ)
+idu samo u EAS, nikad u repo.
 
 ### Svaki sledeći put
 

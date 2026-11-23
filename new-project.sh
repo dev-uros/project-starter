@@ -23,6 +23,9 @@
 # What it produces:
 #
 #   ~/Desktop/fg-projects/client_hub/
+#     CLAUDE.md, .mcp.json, .claude/
+#                   one Claude Code session from here knows every folder:
+#                   the map of the folders, all MCP servers, all skills
 #     Makefile      knows this project's ports; `make up`, `make web`, `make ports`
 #     api/          the Laravel backend, .env written for this project
 #     web/          the Vue frontend, .env written for this project
@@ -293,7 +296,8 @@ finished=0
 
 cleanup() {
     [ "$finished" -eq 0 ] || return 0
-    rm -rf "$dir/api" "$dir/web" "$dir/infra" "$dir/$MOBILE_DIR" "$dir/Makefile"
+    rm -rf "$dir/api" "$dir/web" "$dir/infra" "$dir/$MOBILE_DIR" "$dir/Makefile" \
+        "$dir/CLAUDE.md" "$dir/.mcp.json" "$dir/.claude"
     [ "$dir_created" -eq 0 ] || rmdir "$dir" 2>/dev/null || true
     printf '  removed the unfinished project, %s\n\n' "$dir" >&2
 }
@@ -566,6 +570,194 @@ help: ## Show this help
 MAKEFILE
 } > "$dir/Makefile"
 
+# --- one Claude Code session for the whole project ---------------------------
+
+# The project is meant to be worked on from its root: one session that knows
+# every folder, instead of one per folder. Claude Code reads CLAUDE.md, .mcp.json
+# and .claude/ only from the folder a session starts in, so the root gets its
+# own -- a map of the folders, every template's MCP servers, and links to every
+# template's skills. A session started inside one folder still works and loads
+# only that folder's set.
+
+# Claude Code reads CLAUDE.md, never AGENTS.md. The frontend links one to the
+# other; a template that forgets to would have its rules silently ignored.
+for d in web "$MOBILE_DIR"; do
+    [ -f "$dir/$d/AGENTS.md" ] || continue
+    [ -e "$dir/$d/CLAUDE.md" ] || [ -L "$dir/$d/CLAUDE.md" ] ||
+        (cd "$dir/$d" && ln -s AGENTS.md CLAUDE.md)
+done
+
+say "writing CLAUDE.md, .mcp.json and .claude/ for working from the root"
+
+infra_row=""
+[ "$with_infra" -eq 1 ] &&
+    infra_row='| `infra/` | the shared server stack: Traefik and the log stack (Loki, Alloy, Grafana). No application lives here | `infra/README.md`, and `infra/docs/server-setup.md` for a server from scratch |
+'
+mobile_row=""
+mobile_contract=""
+mobile_mcp=""
+mobile_cmd=""
+if [ "$with_mobile" -eq 1 ]; then
+    mobile_row="| \`$MOBILE_DIR/\` | Expo app for internal (backoffice) users -- React Native, Expo Router, TanStack Query, Zod. iOS and Android, no web target | \`$MOBILE_DIR/AGENTS.md\`. A new screen or feature goes through the \`new-feature\` skill |
+"
+    mobile_contract=" and \`$MOBILE_DIR/\`"
+    mobile_mcp="- **maestro** -- drives the iOS simulator and Android emulator for the
+  mobile app's end-to-end flows. Needs the \`maestro\` CLI installed and a
+  dev build running (\`make mobile-ios\` / \`make mobile-android\`).
+- The **Expo plugin** (\`.claude/settings.json\`) -- the \`expo:*\` skills and
+  Expo's MCP tools. The mobile rules require checking Expo's docs before
+  touching any Expo or React Native API: Expo changes every SDK release.
+"
+    mobile_cmd="- mobile: \`cd $MOBILE_DIR && ...\` -- packages only through
+  \`npx expo install\`, never a bare \`npm install <pkg>\`, so the versions
+  match the SDK.
+"
+fi
+
+cat > "$dir/CLAUDE.md" <<CLAUDE
+# $title -- project root
+
+One project, several stacks. This root is where work starts: describe the task,
+and the folders below say how each part of it is done. Each folder has its own
+rules, its own toolchain and its own deploy -- a change in \`web/\` does not
+redeploy the API.
+
+| Folder | What | Read before touching it |
+| --- | --- | --- |
+| \`api/\` | Laravel API, runs in Docker (\`make\` targets, never bare \`php\`/\`artisan\`/\`composer\` on the host) | \`api/CLAUDE.md\`, then every row of \`api/.ai/rules/index.md\` whose globs match the files you touch |
+| \`web/\` | Vue 3 SPA for the backoffice (Vite, Nuxt UI as a component library, Pinia Colada) | \`web/AGENTS.md\` |
+${mobile_row}${infra_row}
+**Those files are the contract; this one only points at them.** Read the
+matching file before the first edit in a folder, even for a small change -- the
+rules there are specific to this codebase and override general habits.
+
+## A task that crosses folders
+
+The API is the source of truth for every client. \`api/docs/frontend-integration.md\`
+is the contract between the API and \`web/\`${mobile_contract}, and the reference
+generated from the code is at \`/docs/api\` on the running API (\`make ports\`).
+A change to a response shape, a new endpoint or a new validation message is made
+in \`api/\` first, documented there in the same change, and then used by the
+clients -- each by its own rules. It has to satisfy every side it touches.
+
+The API's \`message\` field is written for the end user, in Serbian, and the
+clients show it as it arrives.
+
+## Commands run inside their folder
+
+Paths and commands in each folder's rules are relative to that folder.
+
+- api: \`make -C api <target>\` (\`make -C api help\` lists them); artisan as
+  \`make -C api artisan c="..."\`. The containers must be up: \`make up\`.
+- web: \`cd web && npm ...\`
+${mobile_cmd}
+The workspace \`Makefile\` here starts things: \`make help\` lists \`up\`, \`down\`,
+\`web\`, \`test\`, \`ports\`$( [ "$with_mobile" -eq 1 ] && printf ', `mobile`, `mobile-ios`, `mobile-android`' ).
+
+## Skills and MCP are wired up at this root
+
+\`.mcp.json\` here holds the MCP servers every folder's own \`.mcp.json\`
+declares, so a session started in this folder has all of them:
+
+- **laravel-boost** -- Laravel docs search, \`database-query\`, \`database-schema\`,
+  \`tinker\`, \`browser-logs\`. Runs **inside the \`php\` container**
+  (\`docker compose -f api/compose.yaml exec\`), not on the host: \`DB_HOST=postgres\`
+  only resolves inside the Compose network. The containers must be up (\`make up\`).
+- **nuxt-ui**, **zod** -- hosted servers. Querying \`nuxt-ui\` for props, slots
+  and examples before writing a \`U*\` component is mandatory (\`web/AGENTS.md\`).
+- **playwright** -- a live browser, for checking the SPA.
+${mobile_mcp}
+\`.claude/skills/\` holds links to every skill in \`api/.claude/skills/\`,
+\`web/.claude/skills/\`$( [ "$with_mobile" -eq 1 ] && printf ' and `%s/.claude/skills/`' "$MOBILE_DIR" ). Use the skill a
+folder's rules name for the task. Edit a skill in the folder that owns it, never
+through the link, and add a link here when a new one is installed there.
+CLAUDE
+
+{
+    printf '{\n  "mcpServers": {\n'
+    cat <<'MCP'
+    "laravel-boost": {
+      "type": "stdio",
+      "command": "docker",
+      "args": ["compose", "-f", "api/compose.yaml", "exec", "-T", "--user", "www-data", "php", "php", "artisan", "boost:mcp"]
+    },
+    "nuxt-ui": {
+      "type": "http",
+      "url": "https://ui.nuxt.com/mcp"
+    },
+    "zod": {
+      "type": "http",
+      "url": "https://mcp.inkeep.com/zod/mcp"
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"],
+      "env": {}
+    }
+MCP
+    if [ "$with_mobile" -eq 1 ]; then
+        cat <<'MCP'
+    ,
+    "maestro": {
+      "type": "stdio",
+      "command": "maestro",
+      "args": ["mcp"],
+      "env": {}
+    }
+MCP
+    fi
+    printf '  }\n}\n'
+} > "$dir/.mcp.json"
+
+# The root's servers are written above rather than merged from the templates --
+# merging JSON portably needs a tool this script does not require, and boost has
+# to be rewritten to run in the container anyway. So say when a template has
+# gained a server the root does not know about.
+mcp_names() {
+    grep -oE '^ *"[^"]+": *\{' "$1" | sed -E 's/^ *"([^"]+)".*/\1/' |
+        grep -vxE 'mcpServers|env|headers' || true
+}
+for d in api web "$MOBILE_DIR"; do
+    [ -f "$dir/$d/.mcp.json" ] || continue
+    for server in $(mcp_names "$dir/$d/.mcp.json"); do
+        grep -q "\"$server\":" "$dir/.mcp.json" ||
+            say "warning: $d/.mcp.json declares '$server', which the root .mcp.json does not -- add it to new-project.sh"
+    done
+done
+
+mkdir -p "$dir/.claude/skills"
+
+if [ "$with_mobile" -eq 1 ]; then
+    cat > "$dir/.claude/settings.json" <<'SETTINGS'
+{
+  "enabledPlugins": {
+    "expo@claude-plugins-official": true
+  }
+}
+SETTINGS
+    # Same reasoning as .mcp.json: copied by hand, so report a difference.
+    if [ -f "$dir/$MOBILE_DIR/.claude/settings.json" ] &&
+        ! cmp -s "$dir/$MOBILE_DIR/.claude/settings.json" "$dir/.claude/settings.json"; then
+        say "warning: $MOBILE_DIR/.claude/settings.json differs from the root's -- check what it added"
+    fi
+fi
+
+# Links, not copies, so a skill updated in its folder is updated at the root.
+# (Git Bash on Windows copies instead unless symlinks are enabled -- still
+# loads, but goes stale.) Two folders shipping a skill of the same name would
+# leave one of them unreachable from here, so that stops the run.
+for d in api web "$MOBILE_DIR"; do
+    [ -d "$dir/$d/.claude/skills" ] || continue
+    for skill in "$dir/$d/.claude/skills"/*/; do
+        [ -d "$skill" ] || continue
+        skill=$(basename "$skill")
+        [ ! -e "$dir/.claude/skills/$skill" ] ||
+            die "the skill '$skill' is in two templates -- rename one of them"
+        ln -s "../../$d/.claude/skills/$skill" "$dir/.claude/skills/$skill"
+    done
+done
+
 # Every file is in place. From here on a failure -- in the build below -- leaves
 # a complete project that only needs booting, so it is kept.
 finished=1
@@ -599,6 +791,8 @@ if [ "$with_mobile" -eq 1 ]; then
     make mobile         Metro only, once a dev build is installed
   Push notifications need the client's Expo, Firebase and Apple
   accounts -- $MOBILE_DIR/docs/push-notifications.md.
+  Crash reports go to Sentry once the project has one --
+  $MOBILE_DIR/docs/sentry.md.
 "
 fi
 
