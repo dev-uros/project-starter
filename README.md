@@ -1,6 +1,7 @@
 # project starter
 
-Jedna komanda koja sklapa nov klijentski projekat — backend, frontend i infra —
+Jedna komanda koja sklapa nov klijentski projekat — backend, frontend, mobilnu
+aplikaciju za interne korisnike i infra —
 iz naših template repoa, sa svojim imenom, svojim kontejnerima i svojim
 portovima.
 
@@ -60,6 +61,9 @@ fg-projects/client_hub/
   api/          Laravel backend, .env napisan za ovaj projekat
   web/          Vue frontend, .env napisan za ovaj projekat
   infra/        deljeni server stack (preskače se sa --no-infra)
+  internal-mobile-app/
+                Expo aplikacija za interne korisnike, .env.local gađa ovaj
+                API (preskače se sa --no-mobile)
 ```
 
 **Pravi samo fajlove.** Nijedan kontejner se ne gradi ni ne diže. Traje par
@@ -114,6 +118,7 @@ Traje par minuta prvi put, jer se gradi PHP image. Redom radi ovo:
 | 5 | poveže `storage` simlink (avatari se odatle serviraju) |
 | 6 | **seeduje prvog administratora** |
 | 7 | `npm install` za frontend |
+| 8 | `npm ci` za mobilnu aplikaciju (ako postoji) |
 
 Korak 6 je ono zbog čega postoji `make init` a ne samo `make up`: bez njega baza
 je prazna i nemaš čime da se prijaviš.
@@ -144,6 +149,24 @@ make web
 
 Vite na `http://localhost:5173`, već podešen da gađa API na 8000.
 
+### 5. Mobilna aplikacija (interni korisnici)
+
+```
+make mobile-ios       sagradi development build i pokreni ga na iOS simulatoru
+make mobile-android   isto na Android emulatoru (pokreni ga sa -no-audio)
+make mobile           samo Metro, kad je build već instaliran
+```
+
+Aplikacija ne radi u Expo Go — prvi put se gradi native build (par minuta), posle
+je dovoljan `make mobile`. Za iOS treba Xcode, za Android Android Studio i
+emulator. Prijava je istim nalozima kao web. Sve ostalo — struktura, testovi,
+Maestro flowovi — je u `internal-mobile-app/README.md` i `AGENTS.md`.
+
+**Push obaveštenja** su podržana do kraja (backend, aplikacija, testovi), ali
+nisu vezana ni za čiji nalog: Expo projekat, Firebase i Apple APNs ključ se
+podešavaju po projektu, kad klijent ima naloge. Uputstvo korak po korak:
+`internal-mobile-app/docs/push-notifications.md`.
+
 ### Svaki sledeći put
 
 ```
@@ -169,7 +192,7 @@ različitih foldera.
 `make down` u njemu, ili napravi ovaj sa `--port-base 8100` pa mogu uporedo.
 Skripta te i pri pravljenju upozori ako nešto već sluša.
 
-**`git clone` traži lozinku** — nemaš pristup nekom od tri repoa. Traži pristup,
+**`git clone` traži lozinku** — nemaš pristup nekom od template repoa. Traži pristup,
 ili proveri da ti je SSH ključ/token podešen za GitHub. Ako clone pukne, skripta
 obriše polovičan projekat, pa posle samo pusti istu komandu ponovo.
 
@@ -198,6 +221,7 @@ ima svoje kontejnere, svoje volumene i svoju mrežu.
 | --- | --- |
 | `localhost:8000` | Laravel API (`/docs/api`, `/horizon`, `/pulse`) |
 | `localhost:5173` | Vite, frontend |
+| `localhost:8081` | Metro, mobilna aplikacija (`make mobile`) |
 | `localhost:5433` | postgres |
 | `localhost:5434` | test baza |
 | `localhost:6379` | redis |
@@ -238,6 +262,7 @@ bazu, pa je `base+6` uvek frontend.
 | `--port-base N` | pomeri portove u blok od deset odavde — za dva projekta uporedo |
 | `--dir PATH` | gde se pravi folder; jače od `$PROJECTS_DIR`, preskače prompt |
 | `--no-infra` | preskoči infra repo — kad projekat ide na server koji ga već vrti |
+| `--no-mobile` | preskoči `internal-mobile-app/` — projekat bez mobilne aplikacije |
 | `--setup` | i sagradi kontejnere, migriraj, instaliraj `node_modules` |
 
 Destinacija se bira na tri nivoa, od jačeg ka slabijem: `--dir PATH` za jedan

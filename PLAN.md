@@ -15,7 +15,7 @@ tako i rastu.
 | --- | --- | --- | --- |
 | glavni API | Laravel | `api/` | ✅ postoji |
 | backoffice | Vue SPA | `admin/` (danas `web/`) | ✅ postoji |
-| interna aplikacija | Capacitor + Vue + Ionic + Nuxt UI | `app/` | sledeći — vidi dole |
+| interna aplikacija | Expo (React Native) | `internal-mobile-app/` | ✅ postoji |
 | eksterna aplikacija | React Native | `mobile/` | izvući iz trenutnog projekta |
 | javni sajt | Nuxt (ili Astro za čisto sadržajne) | `site/` | izvući iz trenutnog projekta |
 | realtime | Fastify (WebSocket, SSE) | `realtime/` | kad zatreba |
@@ -51,6 +51,10 @@ admin: grupe ruta, token auth pored cookie autha, broadcast eventi preko Redisa.
 ---
 
 ## Capacitor interna aplikacija
+
+> **Zamenjeno (2026-11):** interna aplikacija je urađena u Expo-u —
+> `dev-uros/expo-internal-ai-setup`, u projektu `internal-mobile-app/`. Ostatak
+> ove sekcije je prvobitni Capacitor plan i ostaje samo kao zapis.
 
 Uzor je `~/Desktop/fg-projects/bullet-notes`: Ionic samo kao školjka, sav
 vidljivi UI iz jedne biblioteke. Tamo je to roughness, ovde Nuxt UI.

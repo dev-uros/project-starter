@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Bootstrap a new client project from the three template repositories.
+# Bootstrap a new client project from the template repositories.
 #
 #   ./new-project.sh client_hub
 #   ./new-project.sh acme --port-base 8200 --dir ~/work
@@ -27,6 +27,9 @@
 #     api/          the Laravel backend, .env written for this project
 #     web/          the Vue frontend, .env written for this project
 #     infra/        the shared server stack (see the note under --no-infra)
+#     internal-mobile-app/
+#                   the Expo app for internal users, .env.local pointing at
+#                   this project's API (skipped with --no-mobile)
 #
 # Every container, volume and image is named after the project, so projects
 # cannot overwrite each other's data. That is one variable --
@@ -52,6 +55,8 @@ set -euo pipefail
 API_REPO="${API_REPO:-https://github.com/dev-uros/laravel-backend-ai-setup.git}"
 WEB_REPO="${WEB_REPO:-https://github.com/dev-uros/vue-front-ai-setup.git}"
 INFRA_REPO="${INFRA_REPO:-https://github.com/dev-uros/infra-ai-setup.git}"
+MOBILE_REPO="${MOBILE_REPO:-https://github.com/dev-uros/expo-internal-ai-setup.git}"
+MOBILE_DIR="internal-mobile-app"
 
 # Ports. By default a project keeps the template's own defaults -- 8000 for the
 # API, 5173 for Vite, 5433/5434 for Postgres, 6379 for Redis -- so every project
@@ -74,6 +79,7 @@ name=""
 port_base=""
 parent_dir=""      # --dir, then $PROJECTS_DIR, then the prompt below
 with_infra=1
+with_mobile=1
 run_setup=0
 check_error=""
 
@@ -154,6 +160,8 @@ usage() {
                         the default is ~/Desktop/fg-projects
     --no-infra          skip the infra repo -- correct when this project will be
                         deployed onto a server that already runs it
+    --no-mobile         skip internal-mobile-app/, the Expo app for internal
+                        users -- for a project with no mobile app
     --setup             also build the containers, migrate and install the
                         frontend dependencies -- the same as `make init`.
                         Off by default: creating a
@@ -186,6 +194,7 @@ while [ $# -gt 0 ]; do
         --port-base) need_value "$@"; port_base=$2; shift 2 ;;
         --dir)       need_value "$@"; parent_dir=$2; shift 2 ;;
         --no-infra)  with_infra=0; shift ;;
+        --no-mobile) with_mobile=0; shift ;;
         --setup)     run_setup=1; shift ;;
         --no-setup)  run_setup=0; shift ;;   # accepted, and now the default
         -*)          die "unknown option: $1" ;;
@@ -284,7 +293,7 @@ finished=0
 
 cleanup() {
     [ "$finished" -eq 0 ] || return 0
-    rm -rf "$dir/api" "$dir/web" "$dir/infra" "$dir/Makefile"
+    rm -rf "$dir/api" "$dir/web" "$dir/infra" "$dir/$MOBILE_DIR" "$dir/Makefile"
     [ "$dir_created" -eq 0 ] || rmdir "$dir" 2>/dev/null || true
     printf '  removed the unfinished project, %s\n\n' "$dir" >&2
 }
@@ -319,6 +328,7 @@ clone() {
 clone "$API_REPO" api
 clone "$WEB_REPO" web
 [ "$with_infra" -eq 1 ] && clone "$INFRA_REPO" infra
+[ "$with_mobile" -eq 1 ] && clone "$MOBILE_REPO" "$MOBILE_DIR"
 
 # --- environment -------------------------------------------------------------
 
@@ -421,6 +431,19 @@ cp "$dir/web/.env.example" "$dir/web/.env"
 # is what `make web` in the generated Makefile does.
 set_env VITE_API_URL "http://localhost:$app_port/api" "$dir/web/.env"
 
+if [ "$with_mobile" -eq 1 ]; then
+    say "writing $MOBILE_DIR/.env.local"
+    cp "$dir/$MOBILE_DIR/.env.example" "$dir/$MOBILE_DIR/.env.local"
+    # localhost is the simulator's own loopback, which is the Mac's on iOS; the
+    # Android emulator reaches it through `adb reverse` on the same port, which
+    # `make mobile-android` sets up. A physical phone needs the Mac's LAN
+    # address here instead.
+    set_env EXPO_PUBLIC_API_URL "http://localhost:$app_port/api" "$dir/$MOBILE_DIR/.env.local"
+    # EAS_PROJECT_ID and EXPO_OWNER stay empty: they belong to the client's
+    # Expo account, set up once per project -- see
+    # internal-mobile-app/docs/push-notifications.md.
+fi
+
 # --- workspace Makefile ------------------------------------------------------
 
 say "writing Makefile"
@@ -441,6 +464,13 @@ init: ## First run: boot, migrate, seed the first user, install frontend deps
 	@$(MAKE) -C api setup
 	@$(MAKE) -C api artisan c="db:seed --force"
 	cd web && npm install
+MAKEFILE
+    if [ "$with_mobile" -eq 1 ]; then
+        # npm ci, not install: the lockfile holds the SDK-matched versions, and
+        # a fresh project must not resolve anything differently.
+        printf '\tcd %s && npm ci\n' "$MOBILE_DIR"
+    fi
+    cat <<'MAKEFILE'
 	@echo ""
 	@echo "  the first administrator is seeded by"
 	@echo "  api/database/seeders/UserSeeder.php -- password: password"
@@ -458,6 +488,26 @@ down: ## Stop the API stack (data volumes are kept)
 web: ## Run the frontend dev server on this project's port
 	cd web && npm run dev -- --port $(VITE_PORT) --strictPort
 
+MAKEFILE
+    if [ "$with_mobile" -eq 1 ]; then
+        printf 'MOBILE_DIR   := %s\n\n' "$MOBILE_DIR"
+        cat <<'MAKEFILE'
+.PHONY: mobile
+mobile: ## Run Metro for the mobile app (the dev build must be installed)
+	cd $(MOBILE_DIR) && npx expo start --dev-client --port 8081
+
+.PHONY: mobile-ios
+mobile-ios: ## Build the mobile dev build and run it on the iOS simulator
+	cd $(MOBILE_DIR) && npm run ios
+
+.PHONY: mobile-android
+mobile-android: ## Build the mobile dev build and run it on the Android emulator
+	adb reverse tcp:$(APP_PORT) tcp:$(APP_PORT)
+	cd $(MOBILE_DIR) && npm run android
+
+MAKEFILE
+    fi
+    cat <<'MAKEFILE'
 .PHONY: observe
 observe: ## Start Grafana + Loki + Alloy for this project
 	@$(MAKE) -C api observe
@@ -475,6 +525,9 @@ ports: ## Show which host port belongs to what
 	@echo "  docs       http://localhost:$(APP_PORT)/docs/api"
 	@echo "  horizon    http://localhost:$(APP_PORT)/horizon"
 	@echo "  web        http://localhost:$(VITE_PORT)"
+ifdef MOBILE_DIR
+	@echo "  metro      http://localhost:8081   (make mobile)"
+endif
 	@echo "  grafana    http://localhost:$(GRAFANA_PORT)   (make observe)"
 	@echo "  postgres   localhost:$(DB_PORT)"
 	@echo "  redis      localhost:$(REDIS_PORT)"
@@ -486,7 +539,7 @@ help: ## Show this help
 	@echo "  usage: make <target>"
 	@echo ""
 	@grep -hE "^[a-zA-Z_-]+:.*?## .*$$" $(MAKEFILE_LIST) \
-		| awk "BEGIN {FS = \":.*?## \"}; {printf \"  \033[36m%-10s\033[0m %s\n\", \$$1, \$$2}"
+		| awk "BEGIN {FS = \":.*?## \"}; {printf \"  \033[36m%-15s\033[0m %s\n\", \$$1, \$$2}"
 	@echo ""
 MAKEFILE
 } > "$dir/Makefile"
@@ -515,6 +568,18 @@ fi
 
 # --- what to do next ---------------------------------------------------------
 
+mobile_next=""
+if [ "$with_mobile" -eq 1 ]; then
+    mobile_next="
+  The mobile app is in $MOBILE_DIR/ and talks to this API:
+    make mobile-ios     build the dev build on the iOS simulator
+    make mobile-android the same on the Android emulator
+    make mobile         Metro only, once a dev build is installed
+  Push notifications need the client's Expo, Firebase and Apple
+  accounts -- $MOBILE_DIR/docs/push-notifications.md.
+"
+fi
+
 if [ "$run_setup" -eq 1 ]; then
     booted="    make ports          what is on which port
     make web            start the frontend"
@@ -534,7 +599,7 @@ $booted
   api       http://localhost:$app_port
   docs      http://localhost:$app_port/docs/api
   web       http://localhost:$vite_port
-
+$mobile_next
   Containers are named ${name}-php-1, ${name}-postgres-1, and so on,
   so this project cannot collide with another one on this machine.
 
