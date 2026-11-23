@@ -793,6 +793,8 @@ if [ "$with_mobile" -eq 1 ]; then
   accounts -- $MOBILE_DIR/docs/push-notifications.md.
   Crash reports go to Sentry once the project has one --
   $MOBILE_DIR/docs/sentry.md.
+  Dev, test and production apps side by side, and EAS builds --
+  $MOBILE_DIR/docs/builds.md.
 "
 fi
 

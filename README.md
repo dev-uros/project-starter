@@ -194,6 +194,16 @@ i restartuj Metro; telefon i Mac moraju biti na istom Wi-Fi-ju. Detalji u
 `internal-mobile-app/README.md`. Sve ostalo — struktura, testovi,
 Maestro flowovi — je u `internal-mobile-app/README.md` i `AGENTS.md`.
 
+#### Tri aplikacije na istom telefonu
+
+Iz istog koda prave se tri aplikacije koje stoje jedna pored druge: **Ime (Dev)**,
+**Ime (Test)** i **Ime**. Svaka ima svoj bundle id, svoj API i svoje Sentry
+okruženje. Lokalni rad (`make mobile-ios`, `make mobile-android`) je uvek dev
+varijanta (`APP_VARIANT=development` u `.env.local`). Test i produkciju pravi
+EAS: `npm run build:preview` i `npm run build:production` u
+`internal-mobile-app/`. Lokalno rade sve tri i bez naloga. Detalji su u
+`internal-mobile-app/docs/builds.md`.
+
 #### Nalozi koje mobilna aplikacija traži po projektu
 
 Template nije vezan ni za čiji nalog. Sve radi lokalno bez njih, ali za
@@ -202,9 +212,10 @@ firminu organizaciju, nikad lične:
 
 | Nalog | Za šta | Bez njega | Uputstvo |
 | --- | --- | --- | --- |
-| **Expo** (organizacija na expo.dev) | EAS build-ovi, push token | nema push-a ni EAS build-a | `docs/push-notifications.md` |
+| **Expo** (organizacija na expo.dev) | EAS build-ovi (dev, test, produkcija), push token | nema push-a ni build-a na Expo serverima | `docs/builds.md` |
 | **Firebase** projekat (besplatan) | push na Androidu | Android ne dobija push | `docs/push-notifications.md` |
-| **Apple Developer** (plaćen) | push na iOS-u, TestFlight, App Store | iOS ne dobija push, nema distribucije | `docs/push-notifications.md` |
+| **Apple Developer** (plaćen) | push na iOS-u, build na iPhone, TestFlight, App Store | iOS ne dobija push, nema instalacije na iPhone ni distribucije | `docs/push-notifications.md`, `docs/builds.md` |
+| **Google Play Developer** (jednokratna taksa) | objava na Google Play | nema Play Store-a (test APK i dalje radi) | `docs/builds.md` |
 | **Sentry** (besplatan plan: 5.000 grešaka mesečno) | prijave padova i grešaka iz release build-ova | aplikacija radi, ali greške korisnika ne vidi niko | `docs/sentry.md` |
 
 Putanje su u `internal-mobile-app/`. Push je podržan do kraja (backend,
