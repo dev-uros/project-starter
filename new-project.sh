@@ -352,6 +352,17 @@ set_env() {
     mv "$tmp" "$file"
 }
 
+# Every occurrence of a literal string, replaced in place -- the same
+# portability reason as set_env.
+replace_in_file() {
+    local from=$1 to=$2 file=$3 tmp line
+    tmp=$(mktemp)
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "${line//"$from"/$to}"
+    done < "$file" > "$tmp"
+    mv "$tmp" "$file"
+}
+
 say "writing api/.env"
 cp "$dir/api/.env.example" "$dir/api/.env"
 
@@ -442,6 +453,17 @@ if [ "$with_mobile" -eq 1 ]; then
     # EAS_PROJECT_ID and EXPO_OWNER stay empty: they belong to the client's
     # Expo account, set up once per project -- see
     # internal-mobile-app/docs/push-notifications.md.
+
+    # The app is called after the project, like APP_NAME in api/.env: the name
+    # under the icon and in the permission texts. The template's placeholder
+    # appears nowhere else in app.json. Bundle id, package and slug stay as
+    # they are -- the client's Apple and Firebase keys are bound to the first
+    # two, and the Maestro flows to all three; changing them is step 0 of
+    # docs/push-notifications.md.
+    say "naming the mobile app $title"
+    replace_in_file "Backoffice" "$title" "$dir/$MOBILE_DIR/app.json"
+    grep -q "\"name\": \"$title\"" "$dir/$MOBILE_DIR/app.json" ||
+        die "$MOBILE_DIR/app.json has no \"name\": \"Backoffice\" -- has the template renamed it?"
 fi
 
 # --- workspace Makefile ------------------------------------------------------

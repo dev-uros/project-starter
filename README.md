@@ -159,7 +159,18 @@ make mobile           samo Metro, kad je build već instaliran
 
 Aplikacija ne radi u Expo Go — prvi put se gradi native build (par minuta), posle
 je dovoljan `make mobile`. Za iOS treba Xcode, za Android Android Studio i
-emulator. Prijava je istim nalozima kao web. Sve ostalo — struktura, testovi,
+emulator. Prijava je istim nalozima kao web.
+
+Aplikacija se zove kao projekat (`client_hub` → „Client Hub", ime ispod ikonice
+i u tekstovima dozvola). Bundle id i Android package ostaju
+`com.example.backoffice` dok klijent nema naloge — menjaju se u koraku 0 uputstva
+za push, jer Apple i Firebase vežu ključeve baš za njih.
+
+**Na fizičkom telefonu** `localhost` je sam telefon. U
+`internal-mobile-app/.env.local` upiši LAN adresu Mac-a
+(`ipconfig getifaddr en0`, npr. `EXPO_PUBLIC_API_URL=http://192.168.1.23:8000/api`)
+i restartuj Metro; telefon i Mac moraju biti na istom Wi-Fi-ju. Detalji u
+`internal-mobile-app/README.md`. Sve ostalo — struktura, testovi,
 Maestro flowovi — je u `internal-mobile-app/README.md` i `AGENTS.md`.
 
 **Push obaveštenja** su podržana do kraja (backend, aplikacija, testovi), ali
