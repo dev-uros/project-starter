@@ -212,11 +212,26 @@ firminu organizaciju, nikad lične:
 
 | Nalog | Za šta | Bez njega | Uputstvo |
 | --- | --- | --- | --- |
-| **Expo** (organizacija na expo.dev) | EAS build-ovi (dev, test, produkcija), push token | nema push-a ni build-a na Expo serverima | `docs/builds.md` |
+| **Expo** (organizacija na expo.dev) | EAS build-ovi (dev, test, produkcija), push token, OTA update-ovi | nema push-a, build-a na Expo serverima ni OTA-a | `docs/builds.md`, `docs/updates.md` |
 | **Firebase** projekat (besplatan) | push na Androidu | Android ne dobija push | `docs/push-notifications.md` |
 | **Apple Developer** (plaćen) | push na iOS-u, build na iPhone, TestFlight, App Store | iOS ne dobija push, nema instalacije na iPhone ni distribucije | `docs/push-notifications.md`, `docs/builds.md` |
 | **Google Play Developer** (jednokratna taksa) | objava na Google Play | nema Play Store-a (test APK i dalje radi) | `docs/builds.md` |
 | **Sentry** (besplatan plan: 5.000 grešaka mesečno) | prijave padova i grešaka iz release build-ova | aplikacija radi, ali greške korisnika ne vidi niko | `docs/sentry.md` |
+
+#### Ažuriranja: OTA i obavezno ažuriranje
+
+Oba su ugrađena od prve verzije, jer aplikacija koja izađe bez njih ne može
+kasnije da ih dobije:
+
+- **OTA (EAS Update):** ispravka u JS-u stiže na telefone bez prodavnice
+  (`npm run update:preview`, `npm run update:production`), svaka varijanta na
+  svom kanalu. Isključeno je dok projekat nema Expo nalog. Uz svaku native
+  promenu diže se `version` u `app.json`.
+- **Obavezno ažuriranje:** aplikacija starija od `MOBILE_IOS_MINIMUM_VERSION` /
+  `MOBILE_ANDROID_MINIMUM_VERSION` iz `.env` API-ja prikazuje samo „Potrebno je
+  ažuriranje" sa linkom ka prodavnici. Radi bez ikakvog naloga.
+
+Detalji su u `internal-mobile-app/docs/updates.md`.
 
 Putanje su u `internal-mobile-app/`. Push je podržan do kraja (backend,
 aplikacija, testovi), a Sentry je ugrađen i ćuti dok su

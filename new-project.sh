@@ -795,6 +795,8 @@ if [ "$with_mobile" -eq 1 ]; then
   $MOBILE_DIR/docs/sentry.md.
   Dev, test and production apps side by side, and EAS builds --
   $MOBILE_DIR/docs/builds.md.
+  Over-the-air updates and the required-update screen
+  (MOBILE_*_MINIMUM_VERSION in api/.env) -- $MOBILE_DIR/docs/updates.md.
 "
 fi
 
