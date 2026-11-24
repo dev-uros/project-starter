@@ -8,7 +8,9 @@ Uzor za funkcionalnosti je reciklomat (`reciklomat-mob` i `reciklomat/api`).
 Uzor za infrastrukturu je naš interni template. Iz reciklomata se prepisuje ono
 što valja, a ne prenosi se ono što je tamo loše (spisak je na kraju).
 
-Status: plan je potvrđen 2026-11-24, ništa još nije napravljeno.
+Status: plan je potvrđen 2026-11-24 i urađen istog dana (faze 1–5); repo
+`dev-uros/expo-external-ai-setup` još nije napravljen na GitHub-u, fork je lokalno u
+`~/generators/expo-external-ai-setup`.
 
 **Odluke iz odeljka „Potvrđene odluke" na kraju imaju prednost nad svim
 ostalim u ovom fajlu.** Gde se tekst ispod razlikuje (oznake ❓, isticanje

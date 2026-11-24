@@ -15,12 +15,13 @@ tako i rastu.
 | --- | --- | --- | --- |
 | glavni API | Laravel | `api/` | ✅ postoji |
 | backoffice | Vue SPA | `admin/` (danas `web/`) | ✅ postoji |
-| interna aplikacija | Expo (React Native) | `internal-mobile-app/` | ✅ postoji |
-| eksterna aplikacija | React Native | `mobile/` | izvući iz trenutnog projekta |
+| interna aplikacija (zaposleni) | Expo (React Native) | `internal-mobile-app/` | ✅ postoji — `--with-internal-app` |
+| eksterna aplikacija (krajnji korisnici) | Expo (React Native), fork interne | `external-mobile-app/` | ✅ postoji — `--with-external-app`, plan u `EXTERNAL-APP-PLAN.md` |
 | javni sajt | Nuxt (ili Astro za čisto sadržajne) | `site/` | izvući iz trenutnog projekta |
 | realtime | Fastify (WebSocket, SSE) | `realtime/` | kad zatreba |
 
-U 90% slučajeva projekat je samo Laravel + Vue admin. Postoje i kombinacije bez
+U 90% slučajeva projekat je samo Laravel + Vue admin — zato su obe mobilne
+aplikacije opcione i bez flagova se ne prave. Postoje i kombinacije bez
 Laravela (npr. samo Fastify + Capacitor).
 
 Novi template se pravi kad ga prvi projekat zatraži, po mogućstvu izvučen iz

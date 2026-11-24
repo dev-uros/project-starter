@@ -31,8 +31,18 @@
 #     web/          the Vue frontend, .env written for this project
 #     infra/        the shared server stack (see the note under --no-infra)
 #     internal-mobile-app/
-#                   the Expo app for internal users, .env.local pointing at
-#                   this project's API (skipped with --no-mobile)
+#                   the Expo app for internal users (staff), .env.local
+#                   pointing at this project's API -- only with
+#                   --with-internal-app
+#     external-mobile-app/
+#                   the Expo app for the project's end users (customers),
+#                   signing in by emailed code, Google or Apple -- only with
+#                   --with-external-app
+#
+# Most projects have neither (Laravel + Vue). Without arguments -- a double
+# click -- the script asks for each app, defaulting to no. The API is the same
+# either way: the external app's part of it is there even when the app is not,
+# so it can be added later.
 #
 # Every container, volume and image is named after the project, so projects
 # cannot overwrite each other's data. That is one variable --
@@ -58,8 +68,14 @@ set -euo pipefail
 API_REPO="${API_REPO:-https://github.com/dev-uros/laravel-backend-ai-setup.git}"
 WEB_REPO="${WEB_REPO:-https://github.com/dev-uros/vue-front-ai-setup.git}"
 INFRA_REPO="${INFRA_REPO:-https://github.com/dev-uros/infra-ai-setup.git}"
-MOBILE_REPO="${MOBILE_REPO:-https://github.com/dev-uros/expo-internal-ai-setup.git}"
-MOBILE_DIR="internal-mobile-app"
+# MOBILE_REPO is the old name of INTERNAL_APP_REPO, still honoured.
+INTERNAL_APP_REPO="${INTERNAL_APP_REPO:-${MOBILE_REPO:-https://github.com/dev-uros/expo-internal-ai-setup.git}}"
+EXTERNAL_APP_REPO="${EXTERNAL_APP_REPO:-https://github.com/dev-uros/expo-external-ai-setup.git}"
+INTERNAL_DIR="internal-mobile-app"
+EXTERNAL_DIR="external-mobile-app"
+# The name each template's app.json carries until the project renames it.
+INTERNAL_PLACEHOLDER="Backoffice"
+EXTERNAL_PLACEHOLDER="Customers"
 
 # Ports. By default a project keeps the template's own defaults -- 8000 for the
 # API, 5173 for Vite, 5433/5434 for Postgres, 6379 for Redis -- so every project
@@ -82,8 +98,13 @@ name=""
 port_base=""
 parent_dir=""      # --dir, then $PROJECTS_DIR, then the prompt below
 with_infra=1
-with_mobile=1
+with_internal=0
+with_external=0
 run_setup=0
+# A run with no arguments at all is the double-click case: it asks for
+# everything, the mobile apps included.
+interactive=0
+[ $# -eq 0 ] && interactive=1
 check_error=""
 
 die() { printf '\n  error: %s\n\n' "$*" >&2; exit 1; }
@@ -163,8 +184,12 @@ usage() {
                         the default is ~/Desktop/fg-projects
     --no-infra          skip the infra repo -- correct when this project will be
                         deployed onto a server that already runs it
-    --no-mobile         skip internal-mobile-app/, the Expo app for internal
-                        users -- for a project with no mobile app
+    --with-internal-app add internal-mobile-app/, the Expo app for the
+                        project's staff (the internal users of the backoffice)
+    --with-external-app add external-mobile-app/, the Expo app for the
+                        project's end users -- customers, citizens, members
+                        Without either flag the project has no mobile app.
+                        Run with no arguments and it asks for each.
     --setup             also build the containers, migrate and install the
                         frontend dependencies -- the same as `make init`.
                         Off by default: creating a
@@ -197,7 +222,15 @@ while [ $# -gt 0 ]; do
         --port-base) need_value "$@"; port_base=$2; shift 2 ;;
         --dir)       need_value "$@"; parent_dir=$2; shift 2 ;;
         --no-infra)  with_infra=0; shift ;;
-        --no-mobile) with_mobile=0; shift ;;
+        --with-internal-app) with_internal=1; shift ;;
+        --with-external-app) with_external=1; shift ;;
+        --no-mobile)
+            # Was the way to leave the internal app out when it came by
+            # default. Nothing comes by default now, so the flag has nothing to
+            # do -- said out loud, so an old script learns why.
+            say "--no-mobile is gone: a project now has no mobile app unless asked for --"
+            say "--with-internal-app and/or --with-external-app"
+            shift ;;
         --setup)     run_setup=1; shift ;;
         --no-setup)  run_setup=0; shift ;;   # accepted, and now the default
         -*)          die "unknown option: $1" ;;
@@ -258,6 +291,27 @@ fi
 # ship before 12.
 parent_dir=$(cd "$parent_dir" && pwd)
 
+# --- mobile apps -------------------------------------------------------------
+
+# Asked only in the double-click case; flags decide everything else, so a
+# script calling this never blocks on a question.
+ask_yes_no() {
+    local question=$1 answer
+    printf '\n  %s [y/N] ' "$question"
+    read -r answer || { printf '\n'; die "cancelled"; }
+    case "$answer" in
+        y|Y|yes|YES|da|DA|d|D) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+if [ "$interactive" -eq 1 ] && [ -t 0 ]; then
+    ask_yes_no "Interna mobilna aplikacija (za zaposlene)?" && with_internal=1
+    ask_yes_no "Eksterna mobilna aplikacija (za krajnje korisnike)?" && with_external=1
+fi
+with_mobile=0
+[ "$with_internal" -eq 1 ] || [ "$with_external" -eq 1 ] && with_mobile=1
+
 dir="$parent_dir/$name"
 
 if [ -d "$dir" ] && [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
@@ -296,7 +350,7 @@ finished=0
 
 cleanup() {
     [ "$finished" -eq 0 ] || return 0
-    rm -rf "$dir/api" "$dir/web" "$dir/infra" "$dir/$MOBILE_DIR" "$dir/Makefile" \
+    rm -rf "$dir/api" "$dir/web" "$dir/infra" "$dir/$INTERNAL_DIR" "$dir/$EXTERNAL_DIR" "$dir/Makefile" \
         "$dir/CLAUDE.md" "$dir/.mcp.json" "$dir/.claude"
     [ "$dir_created" -eq 0 ] || rmdir "$dir" 2>/dev/null || true
     printf '  removed the unfinished project, %s\n\n' "$dir" >&2
@@ -332,7 +386,8 @@ clone() {
 clone "$API_REPO" api
 clone "$WEB_REPO" web
 [ "$with_infra" -eq 1 ] && clone "$INFRA_REPO" infra
-[ "$with_mobile" -eq 1 ] && clone "$MOBILE_REPO" "$MOBILE_DIR"
+[ "$with_internal" -eq 1 ] && clone "$INTERNAL_APP_REPO" "$INTERNAL_DIR"
+[ "$with_external" -eq 1 ] && clone "$EXTERNAL_APP_REPO" "$EXTERNAL_DIR"
 
 # --- environment -------------------------------------------------------------
 
@@ -446,28 +501,55 @@ cp "$dir/web/.env.example" "$dir/web/.env"
 # is what `make web` in the generated Makefile does.
 set_env VITE_API_URL "http://localhost:$app_port/api" "$dir/web/.env"
 
-if [ "$with_mobile" -eq 1 ]; then
-    say "writing $MOBILE_DIR/.env.local"
-    cp "$dir/$MOBILE_DIR/.env.example" "$dir/$MOBILE_DIR/.env.local"
-    # localhost is the simulator's own loopback, which is the Mac's on iOS; the
-    # Android emulator reaches it through `adb reverse` on the same port, which
-    # `make mobile-android` sets up. A physical phone needs the Mac's LAN
-    # address here instead.
-    set_env EXPO_PUBLIC_API_URL "http://localhost:$app_port/api" "$dir/$MOBILE_DIR/.env.local"
-    # EAS_PROJECT_ID and EXPO_OWNER stay empty: they belong to the client's
-    # Expo account, set up once per project -- see
-    # internal-mobile-app/docs/push-notifications.md.
+# Both apps are set up the same way: .env.local pointing at this project's API,
+# and the app named after the project.
+#
+# localhost is the simulator's own loopback, which is the Mac's on iOS; the
+# Android emulator reaches it through `adb reverse` on the same port, which the
+# `*-app-android` targets set up. A physical phone needs the Mac's LAN address
+# instead. EAS_PROJECT_ID, EXPO_OWNER and the sign-in client ids stay empty:
+# they belong to the client's accounts, set up once per project -- see each
+# app's docs/.
+#
+# The name under the icon and in the permission texts follows the project, like
+# APP_NAME in api/.env. Bundle id, package and slug stay as they are -- the
+# client's Apple, Google and Firebase keys are bound to them, and the Maestro
+# flows too; changing them is step 0 of docs/push-notifications.md.
+setup_mobile_app() {
+    local app_dir=$1 placeholder=$2 app_title=$3 file
+    shift 3
 
-    # The app is called after the project, like APP_NAME in api/.env: the name
-    # under the icon and in the permission texts. The template's placeholder
-    # appears nowhere else in app.json. Bundle id, package and slug stay as
-    # they are -- the client's Apple and Firebase keys are bound to the first
-    # two, and the Maestro flows to all three; changing them is step 0 of
-    # docs/push-notifications.md.
-    say "naming the mobile app $title"
-    replace_in_file "Backoffice" "$title" "$dir/$MOBILE_DIR/app.json"
-    grep -q "\"name\": \"$title\"" "$dir/$MOBILE_DIR/app.json" ||
-        die "$MOBILE_DIR/app.json has no \"name\": \"Backoffice\" -- has the template renamed it?"
+    say "writing $app_dir/.env.local"
+    cp "$dir/$app_dir/.env.example" "$dir/$app_dir/.env.local"
+    set_env EXPO_PUBLIC_API_URL "http://localhost:$app_port/api" "$dir/$app_dir/.env.local"
+
+    say "naming $app_dir $app_title"
+    for file in app.json "$@"; do
+        [ -f "$dir/$app_dir/$file" ] ||
+            die "$app_dir/$file is missing -- has the template moved it?"
+        replace_in_file "$placeholder" "$app_title" "$dir/$app_dir/$file"
+    done
+    grep -q "\"name\": \"$app_title\"" "$dir/$app_dir/app.json" ||
+        die "$app_dir/app.json has no \"name\": \"$placeholder\" -- has the template renamed it?"
+}
+
+# With both apps on one phone, the two icons must not read the same: the
+# customers' app carries the project's name, the staff's says what it is.
+internal_title="$title"
+[ "$with_external" -eq 1 ] && internal_title="$title Interno"
+[ "$with_internal" -eq 1 ] && setup_mobile_app "$INTERNAL_DIR" "$INTERNAL_PLACEHOLDER" "$internal_title"
+
+if [ "$with_external" -eq 1 ]; then
+    # iOS shows the camera and photo texts from these, in the phone's language.
+    setup_mobile_app "$EXTERNAL_DIR" "$EXTERNAL_PLACEHOLDER" "$title" \
+        src/i18n/native/sr.json src/i18n/native/en.json
+
+    # The external app signs in with a code mailed to the address. Locally the
+    # API logs mail instead of sending it; these accounts take a fixed code
+    # instead, so the app's Maestro flows -- and anyone trying it -- need no
+    # inbox. Development only: production keeps its own .env.
+    set_env MOBILE_DEMO_EMAILS "maestro@example.com,maestro.code@example.com,maestro.register@example.com,maestro.lang@example.com,maestro.profile@example.com,maestro.theme@example.com,maestro.avatar@example.com,maestro.device@example.com,maestro.prompt@example.com" "$dir/api/.env"
+    set_env MOBILE_DEMO_CODE "424242" "$dir/api/.env"
 fi
 
 # --- workspace Makefile ------------------------------------------------------
@@ -491,10 +573,12 @@ init: ## First run: boot, migrate, seed the first user, install frontend deps
 	@$(MAKE) -C api artisan c="db:seed --force"
 	cd web && npm install
 MAKEFILE
-    if [ "$with_mobile" -eq 1 ]; then
-        # npm ci, not install: the lockfile holds the SDK-matched versions, and
-        # a fresh project must not resolve anything differently.
-        printf '\tcd %s && npm ci\n' "$MOBILE_DIR"
+    # npm ci, not install: the lockfile holds the SDK-matched versions, and a
+    # fresh project must not resolve anything differently.
+    [ "$with_internal" -eq 1 ] && printf '\tcd %s && npm ci\n' "$INTERNAL_DIR"
+    if [ "$with_external" -eq 1 ]; then
+        printf '\tcd %s && npm ci\n' "$EXTERNAL_DIR"
+        printf '\t@$(MAKE) -C api artisan c="mobile:demo-accounts"\n'
     fi
     cat <<'MAKEFILE'
 	@echo ""
@@ -515,24 +599,23 @@ web: ## Run the frontend dev server on this project's port
 	cd web && npm run dev -- --port $(VITE_PORT) --strictPort
 
 MAKEFILE
-    if [ "$with_mobile" -eq 1 ]; then
-        printf 'MOBILE_DIR   := %s\n\n' "$MOBILE_DIR"
-        cat <<'MAKEFILE'
-.PHONY: mobile
-mobile: ## Run Metro for the mobile app (the dev build must be installed)
-	cd $(MOBILE_DIR) && npx expo start --dev-client --port 8081
-
-.PHONY: mobile-ios
-mobile-ios: ## Build the mobile dev build and run it on the iOS simulator
-	cd $(MOBILE_DIR) && npm run ios
-
-.PHONY: mobile-android
-mobile-android: ## Build the mobile dev build and run it on the Android emulator
-	adb reverse tcp:$(APP_PORT) tcp:$(APP_PORT)
-	cd $(MOBILE_DIR) && npm run android
-
-MAKEFILE
-    fi
+    # One set of targets per app, named after it so `make help` says which is
+    # which. Metro is 8081 for both -- the dev builds open it there -- so run
+    # one app at a time.
+    mobile_targets() {
+        local prefix=$1 app_dir=$2 who=$3
+        printf '.PHONY: %s %s-ios %s-android\n' "$prefix" "$prefix" "$prefix"
+        printf '%s: ## Metro for the %s app (%s; its dev build must be installed)\n' "$prefix" "$who" "$app_dir"
+        printf '\tcd %s && npx expo start --dev-client --port 8081\n\n' "$app_dir"
+        printf '%s-ios: ## Build the %s app and run it on the iOS simulator\n' "$prefix" "$who"
+        printf '\tcd %s && npm run ios\n\n' "$app_dir"
+        printf '%s-android: ## Build the %s app and run it on the Android emulator\n' "$prefix" "$who"
+        printf '\tadb reverse tcp:$(APP_PORT) tcp:$(APP_PORT)\n'
+        printf '\tcd %s && npm run android\n\n' "$app_dir"
+    }
+    [ "$with_internal" -eq 1 ] && mobile_targets internal-app "$INTERNAL_DIR" "internal (staff)"
+    [ "$with_external" -eq 1 ] && mobile_targets external-app "$EXTERNAL_DIR" "external (customer)"
+    [ "$with_mobile" -eq 1 ] && printf 'METRO := 8081\n\n'
     cat <<'MAKEFILE'
 .PHONY: observe
 observe: ## Start Grafana + Loki + Alloy for this project
@@ -551,8 +634,8 @@ ports: ## Show which host port belongs to what
 	@echo "  docs       http://localhost:$(APP_PORT)/docs/api"
 	@echo "  horizon    http://localhost:$(APP_PORT)/horizon"
 	@echo "  web        http://localhost:$(VITE_PORT)"
-ifdef MOBILE_DIR
-	@echo "  metro      http://localhost:8081   (make mobile)"
+ifdef METRO
+	@echo "  metro      http://localhost:$(METRO)   (make internal-app / external-app, one at a time)"
 endif
 	@echo "  grafana    http://localhost:$(GRAFANA_PORT)   (make observe)"
 	@echo "  postgres   localhost:$(DB_PORT)"
@@ -581,7 +664,7 @@ MAKEFILE
 
 # Claude Code reads CLAUDE.md, never AGENTS.md. The frontend links one to the
 # other; a template that forgets to would have its rules silently ignored.
-for d in web "$MOBILE_DIR"; do
+for d in web "$INTERNAL_DIR" "$EXTERNAL_DIR"; do
     [ -f "$dir/$d/AGENTS.md" ] || continue
     [ -e "$dir/$d/CLAUDE.md" ] || [ -L "$dir/$d/CLAUDE.md" ] ||
         (cd "$dir/$d" && ln -s AGENTS.md CLAUDE.md)
@@ -597,20 +680,42 @@ mobile_row=""
 mobile_contract=""
 mobile_mcp=""
 mobile_cmd=""
-if [ "$with_mobile" -eq 1 ]; then
-    mobile_row="| \`$MOBILE_DIR/\` | Expo app for internal (backoffice) users -- React Native, Expo Router, TanStack Query, Zod. iOS and Android, no web target | \`$MOBILE_DIR/AGENTS.md\`. A new screen or feature goes through the \`new-feature\` skill |
+mobile_make=""
+mobile_skills=""
+if [ "$with_internal" -eq 1 ]; then
+    mobile_row="${mobile_row}| \`$INTERNAL_DIR/\` | **internal** Expo app -- for the project's staff (the backoffice users, \`users\`), the backoffice on a phone. React Native, Expo Router, TanStack Query, Zod; iOS and Android | \`$INTERNAL_DIR/AGENTS.md\`. A new screen or feature goes through its \`new-feature\` skill |
 "
-    mobile_contract=" and \`$MOBILE_DIR/\`"
+    mobile_contract="${mobile_contract} and \`$INTERNAL_DIR/\`"
+    mobile_make="${mobile_make}, \`internal-app\`, \`internal-app-ios\`, \`internal-app-android\`"
+    mobile_skills="${mobile_skills}, \`$INTERNAL_DIR/.claude/skills/\`"
+fi
+if [ "$with_external" -eq 1 ]; then
+    mobile_row="${mobile_row}| \`$EXTERNAL_DIR/\` | **external** Expo app -- for the project's end users (customers, \`mobile_users\`): sign-in by emailed code, Google or Apple, Serbian and English. Same stack as the internal app | \`$EXTERNAL_DIR/AGENTS.md\`. A new screen or feature goes through its \`new-external-feature\` skill |
+"
+    mobile_contract="${mobile_contract} and \`$EXTERNAL_DIR/\`"
+    mobile_make="${mobile_make}, \`external-app\`, \`external-app-ios\`, \`external-app-android\`"
+    mobile_skills="${mobile_skills}, \`$EXTERNAL_DIR/.claude/skills/\`"
+fi
+if [ "$with_mobile" -eq 1 ]; then
     mobile_mcp="- **maestro** -- drives the iOS simulator and Android emulator for the
-  mobile app's end-to-end flows. Needs the \`maestro\` CLI installed and a
-  dev build running (\`make mobile-ios\` / \`make mobile-android\`).
+  mobile apps' end-to-end flows. Needs the \`maestro\` CLI installed and a
+  dev build running (\`make *-app-ios\` / \`make *-app-android\`).
 - The **Expo plugin** (\`.claude/settings.json\`) -- the \`expo:*\` skills and
   Expo's MCP tools. The mobile rules require checking Expo's docs before
   touching any Expo or React Native API: Expo changes every SDK release.
 "
-    mobile_cmd="- mobile: \`cd $MOBILE_DIR && ...\` -- packages only through
+    mobile_cmd="- mobile: \`cd <app folder> && ...\` -- packages only through
   \`npx expo install\`, never a bare \`npm install <pkg>\`, so the versions
   match the SDK.
+"
+fi
+mobile_language=""
+if [ "$with_external" -eq 1 ]; then
+    mobile_language=" The external app's part of the API (\`/api/mobile/v1\`) answers in
+Serbian or English, after the app's \`Accept-Language\`."
+    mobile_cmd="${mobile_cmd}
+The two populations never mix: the API's \`/api/mobile/v1\` is the external
+app's and refuses a staff token; everything else refuses the external app's.
 "
 fi
 
@@ -641,7 +746,7 @@ in \`api/\` first, documented there in the same change, and then used by the
 clients -- each by its own rules. It has to satisfy every side it touches.
 
 The API's \`message\` field is written for the end user, in Serbian, and the
-clients show it as it arrives.
+clients show it as it arrives.${mobile_language}
 
 ## Commands run inside their folder
 
@@ -652,7 +757,7 @@ Paths and commands in each folder's rules are relative to that folder.
 - web: \`cd web && npm ...\`
 ${mobile_cmd}
 The workspace \`Makefile\` here starts things: \`make help\` lists \`up\`, \`down\`,
-\`web\`, \`test\`, \`ports\`$( [ "$with_mobile" -eq 1 ] && printf ', `mobile`, `mobile-ios`, `mobile-android`' ).
+\`web\`, \`test\`, \`ports\`${mobile_make}.
 
 ## Skills and MCP are wired up at this root
 
@@ -668,7 +773,7 @@ declares, so a session started in this folder has all of them:
 - **playwright** -- a live browser, for checking the SPA.
 ${mobile_mcp}
 \`.claude/skills/\` holds links to every skill in \`api/.claude/skills/\`,
-\`web/.claude/skills/\`$( [ "$with_mobile" -eq 1 ] && printf ' and `%s/.claude/skills/`' "$MOBILE_DIR" ). Use the skill a
+\`web/.claude/skills/\`${mobile_skills}. Use the skill a
 folder's rules name for the task. Edit a skill in the folder that owns it, never
 through the link, and add a link here when a new one is installed there.
 CLAUDE
@@ -718,7 +823,7 @@ mcp_names() {
     grep -oE '^ *"[^"]+": *\{' "$1" | sed -E 's/^ *"([^"]+)".*/\1/' |
         grep -vxE 'mcpServers|env|headers' || true
 }
-for d in api web "$MOBILE_DIR"; do
+for d in api web "$INTERNAL_DIR" "$EXTERNAL_DIR"; do
     [ -f "$dir/$d/.mcp.json" ] || continue
     for server in $(mcp_names "$dir/$d/.mcp.json"); do
         grep -q "\"$server\":" "$dir/.mcp.json" ||
@@ -737,23 +842,30 @@ if [ "$with_mobile" -eq 1 ]; then
 }
 SETTINGS
     # Same reasoning as .mcp.json: copied by hand, so report a difference.
-    if [ -f "$dir/$MOBILE_DIR/.claude/settings.json" ] &&
-        ! cmp -s "$dir/$MOBILE_DIR/.claude/settings.json" "$dir/.claude/settings.json"; then
-        say "warning: $MOBILE_DIR/.claude/settings.json differs from the root's -- check what it added"
-    fi
+    for d in "$INTERNAL_DIR" "$EXTERNAL_DIR"; do
+        if [ -f "$dir/$d/.claude/settings.json" ] &&
+            ! cmp -s "$dir/$d/.claude/settings.json" "$dir/.claude/settings.json"; then
+            say "warning: $d/.claude/settings.json differs from the root's -- check what it added"
+        fi
+    done
 fi
 
 # Links, not copies, so a skill updated in its folder is updated at the root.
 # (Git Bash on Windows copies instead unless symlinks are enabled -- still
-# loads, but goes stale.) Two folders shipping a skill of the same name would
-# leave one of them unreachable from here, so that stops the run.
-for d in api web "$MOBILE_DIR"; do
+# loads, but goes stale.) The two mobile apps vendor the same third-party
+# skills; an identical one is linked once. Two folders shipping *different*
+# skills of the same name would leave one of them unreachable from here, so
+# that stops the run.
+for d in api web "$INTERNAL_DIR" "$EXTERNAL_DIR"; do
     [ -d "$dir/$d/.claude/skills" ] || continue
     for skill in "$dir/$d/.claude/skills"/*/; do
         [ -d "$skill" ] || continue
         skill=$(basename "$skill")
-        [ ! -e "$dir/.claude/skills/$skill" ] ||
-            die "the skill '$skill' is in two templates -- rename one of them"
+        if [ -e "$dir/.claude/skills/$skill" ]; then
+            diff -rq "$dir/.claude/skills/$skill/" "$dir/$d/.claude/skills/$skill/" >/dev/null ||
+                die "the skill '$skill' is in two templates, and they differ -- rename one of them"
+            continue
+        fi
         ln -s "../../$d/.claude/skills/$skill" "$dir/.claude/skills/$skill"
     done
 done
@@ -783,20 +895,34 @@ fi
 # --- what to do next ---------------------------------------------------------
 
 mobile_next=""
+if [ "$with_internal" -eq 1 ]; then
+    mobile_next="${mobile_next}
+  The internal app (staff) is in $INTERNAL_DIR/:
+    make internal-app-ios      build the dev build on the iOS simulator
+    make internal-app-android  the same on the Android emulator
+    make internal-app          Metro only, once a dev build is installed
+"
+fi
+if [ "$with_external" -eq 1 ]; then
+    mobile_next="${mobile_next}
+  The external app (customers) is in $EXTERNAL_DIR/:
+    make external-app-ios      build the dev build on the iOS simulator
+    make external-app-android  the same on the Android emulator
+    make external-app          Metro only, once a dev build is installed
+  It signs in by emailed code; locally the code is in the API's log, and
+  the demo accounts in api/.env (MOBILE_DEMO_EMAILS) take 424242.
+  Google and Apple sign-in need the client's accounts --
+  $EXTERNAL_DIR/docs/sign-in.md.
+"
+fi
 if [ "$with_mobile" -eq 1 ]; then
-    mobile_next="
-  The mobile app is in $MOBILE_DIR/ and talks to this API:
-    make mobile-ios     build the dev build on the iOS simulator
-    make mobile-android the same on the Android emulator
-    make mobile         Metro only, once a dev build is installed
-  Push notifications need the client's Expo, Firebase and Apple
-  accounts -- $MOBILE_DIR/docs/push-notifications.md.
-  Crash reports go to Sentry once the project has one --
-  $MOBILE_DIR/docs/sentry.md.
-  Dev, test and production apps side by side, and EAS builds --
-  $MOBILE_DIR/docs/builds.md.
-  Over-the-air updates and the required-update screen
-  (MOBILE_*_MINIMUM_VERSION in api/.env) -- $MOBILE_DIR/docs/updates.md.
+    mobile_next="${mobile_next}
+  For each app: push needs the client's Expo, Firebase and Apple accounts
+  (docs/push-notifications.md), crash reports a Sentry project
+  (docs/sentry.md), EAS builds an Expo organisation (docs/builds.md), and
+  over-the-air updates and the required-update screen are in
+  docs/updates.md (MOBILE_INTERNAL_* / MOBILE_EXTERNAL_* in api/.env).
+  One app's Metro at a time: both use port 8081.
 "
 fi
 

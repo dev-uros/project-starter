@@ -64,23 +64,37 @@ fg-projects/client_hub/
   web/          Vue frontend, .env napisan za ovaj projekat
   infra/        deljeni server stack (preskače se sa --no-infra)
   internal-mobile-app/
-                Expo aplikacija za interne korisnike, .env.local gađa ovaj
-                API (preskače se sa --no-mobile)
+                INTERNA Expo aplikacija — za zaposlene (korisnici admin
+                panela); samo uz --with-internal-app
+  external-mobile-app/
+                EKSTERNA Expo aplikacija — za krajnje korisnike (kupci,
+                građani, članovi); samo uz --with-external-app
 ```
+
+**Mobilne aplikacije su opcione, obe.** Većina projekata je samo Laravel + Vue,
+pa bez flagova nema nijedne. Pokrenuta bez argumenata (dvoklik na
+`new-project.command`), skripta posle imena i destinacije pita za svaku
+posebno — „Interna mobilna aplikacija?" i „Eksterna mobilna aplikacija?" —
+sa „ne" kao podrazumevanim odgovorom. Backend je uvek isti: deo API-ja za
+eksternu aplikaciju i admin strana „Korisnici aplikacije" postoje i kad
+aplikacija nije izabrana, pa može da se doda kasnije.
 
 **Claude Code se pokreće iz root-a projekta.** `claude` u `client_hub/` i
 samo kažeš šta treba — root `CLAUDE.md` je mapa foldera i za svaki kaže koji
 fajl s pravilima da pročita pre izmene (`api/CLAUDE.md` + `.ai/rules`,
-`web/AGENTS.md`, `internal-mobile-app/AGENTS.md`). Claude Code čita
+`web/AGENTS.md`, `internal-mobile-app/AGENTS.md`, `external-mobile-app/AGENTS.md`).
+Claude Code čita
 `.mcp.json` i `.claude/` samo iz foldera u kom je sesija pokrenuta, pa ih
 root dobija svoje:
 
 - `.mcp.json` — MCP serveri svih template-a na jednom mestu: laravel-boost
   (radi u `php` kontejneru, treba `make up`), nuxt-ui, zod, playwright i
-  maestro za mobilni.
-- `.claude/skills/` — symlinkovi na skillove iz `api/`, `web/` i
-  `internal-mobile-app/`. Skill se menja u folderu kome pripada.
-- `.claude/settings.json` — uključen Expo plugin.
+  maestro kad postoji mobilna aplikacija.
+- `.claude/skills/` — symlinkovi na skillove iz `api/`, `web/` i mobilnih
+  aplikacija. Skill se menja u folderu kome pripada. Isti vendorovani skill
+  dve aplikacije linkuje se jednom; različiti skillovi istog imena zaustavljaju
+  skriptu (zato je eksterni `new-external-feature`, a interni `new-feature`).
+- `.claude/settings.json` — uključen Expo plugin, kad postoji mobilna aplikacija.
 
 Serveri su upisani u skripti, ne spojeni iz template-a. Kad neki template
 dobije nov MCP server, skripta to javi upozorenjem — tad ga dodaj u
@@ -139,7 +153,8 @@ Traje par minuta prvi put, jer se gradi PHP image. Redom radi ovo:
 | 5 | poveže `storage` simlink (avatari se odatle serviraju) |
 | 6 | **seeduje prvog administratora** |
 | 7 | `npm install` za frontend |
-| 8 | `npm ci` za mobilnu aplikaciju (ako postoji) |
+| 8 | `npm ci` za svaku izabranu mobilnu aplikaciju |
+| 9 | uz eksternu aplikaciju: demo nalozi (`mobile:demo-accounts`) iz `MOBILE_DEMO_EMAILS` |
 
 Korak 6 je ono zbog čega postoji `make init` a ne samo `make up`: bez njega baza
 je prazna i nemaš čime da se prijaviš.
@@ -170,39 +185,56 @@ make web
 
 Vite na `http://localhost:5173`, već podešen da gađa API na 8000.
 
-### 5. Mobilna aplikacija (interni korisnici)
+### 5. Mobilne aplikacije (ako su izabrane)
+
+Dve različite aplikacije, za dve različite publike — nikad ih ne mešaj:
+
+| | interna — `internal-mobile-app/` | eksterna — `external-mobile-app/` |
+| --- | --- | --- |
+| za koga | zaposleni (nalozi iz admin panela, `users`) | krajnji korisnici (kupci, građani; `mobile_users`) |
+| prijava | email i lozinka, isti nalozi kao web | kod na mejl, Google, Apple; registracija u aplikaciji |
+| jezik | srpski | srpski (podrazumevano) i engleski |
+| API | `/api/...` | `/api/mobile/v1/...` — token jedne publike ne prolazi na rutama druge |
+| repo | `dev-uros/expo-internal-ai-setup` | `dev-uros/expo-external-ai-setup` (fork interne) |
+| Makefile | `internal-app-ios`, `internal-app-android`, `internal-app` | `external-app-ios`, `external-app-android`, `external-app` |
 
 ```
-make mobile-ios       sagradi development build i pokreni ga na iOS simulatoru
-make mobile-android   isto na Android emulatoru (pokreni ga sa -no-audio)
-make mobile           samo Metro, kad je build već instaliran
+make internal-app-ios       sagradi development build interne aplikacije na iOS simulatoru
+make external-app-android   isto za eksternu, na Android emulatoru (pokreni ga sa -no-audio)
+make external-app           samo Metro, kad je build već instaliran
 ```
 
-Aplikacija ne radi u Expo Go — prvi put se gradi native build (par minuta), posle
-je dovoljan `make mobile`. Za iOS treba Xcode, za Android Android Studio i
-emulator. Prijava je istim nalozima kao web.
+Aplikacije ne rade u Expo Go — prvi put se gradi native build (par minuta), posle
+je dovoljan Metro. Obe koriste Metro na 8081, pa radi jedna po jedna. Za iOS treba
+Xcode, za Android Android Studio i emulator.
 
 Aplikacija se zove kao projekat (`client_hub` → „Client Hub", ime ispod ikonice
-i u tekstovima dozvola). Bundle id i Android package ostaju
-`com.example.backoffice` dok klijent nema naloge — menjaju se u koraku 0 uputstva
-za push, jer Apple i Firebase vežu ključeve baš za njih.
+i u tekstovima dozvola). Kad projekat ima obe, interna je „Client Hub Interno",
+da se ikonice razlikuju. Bundle id i Android package ostaju `com.example.*` dok
+klijent nema naloge — menjaju se u koraku 0 uputstva za push, jer Apple, Google i
+Firebase vežu ključeve baš za njih.
 
-**Na fizičkom telefonu** `localhost` je sam telefon. U
-`internal-mobile-app/.env.local` upiši LAN adresu Mac-a
-(`ipconfig getifaddr en0`, npr. `EXPO_PUBLIC_API_URL=http://192.168.1.23:8000/api`)
-i restartuj Metro; telefon i Mac moraju biti na istom Wi-Fi-ju. Detalji u
-`internal-mobile-app/README.md`. Sve ostalo — struktura, testovi,
-Maestro flowovi — je u `internal-mobile-app/README.md` i `AGENTS.md`.
+**Eksterna aplikacija lokalno:** nema lozinki. Kod za prijavu stiže na mejl, a
+lokalno ga API piše u log (`api/storage/logs/laravel.log`). Demo nalozi iz
+`MOBILE_DEMO_EMAILS` u `api/.env` (skripta ih upiše, `make init` ih napravi)
+primaju fiksni kod `424242` i ne dobijaju mejl — njih koriste Maestro flowovi, a
+u produkciji App Store i Play recenzenti. Google i Apple dugmad su skrivena dok
+projekat nema te naloge: `external-mobile-app/docs/sign-in.md`.
+
+**Na fizičkom telefonu** `localhost` je sam telefon. U `.env.local` aplikacije
+upiši LAN adresu Mac-a (`ipconfig getifaddr en0`, npr.
+`EXPO_PUBLIC_API_URL=http://192.168.1.23:8000/api`) i restartuj Metro; telefon i
+Mac moraju biti na istom Wi-Fi-ju. Sve ostalo — struktura, testovi, Maestro
+flowovi — je u `README.md` i `AGENTS.md` svake aplikacije.
 
 #### Tri aplikacije na istom telefonu
 
 Iz istog koda prave se tri aplikacije koje stoje jedna pored druge: **Ime (Dev)**,
 **Ime (Test)** i **Ime**. Svaka ima svoj bundle id, svoj API i svoje Sentry
-okruženje. Lokalni rad (`make mobile-ios`, `make mobile-android`) je uvek dev
+okruženje. Lokalni rad (`make *-app-ios`, `make *-app-android`) je uvek dev
 varijanta (`APP_VARIANT=development` u `.env.local`). Test i produkciju pravi
-EAS: `npm run build:preview` i `npm run build:production` u
-`internal-mobile-app/`. Lokalno rade sve tri i bez naloga. Detalji su u
-`internal-mobile-app/docs/builds.md`.
+EAS: `npm run build:preview` i `npm run build:production` u folderu aplikacije.
+Lokalno rade sve tri i bez naloga. Detalji su u `docs/builds.md` svake aplikacije.
 
 #### Nalozi koje mobilna aplikacija traži po projektu
 
@@ -217,6 +249,9 @@ firminu organizaciju, nikad lične:
 | **Apple Developer** (plaćen) | push na iOS-u, build na iPhone, TestFlight, App Store | iOS ne dobija push, nema instalacije na iPhone ni distribucije | `docs/push-notifications.md`, `docs/builds.md` |
 | **Google Play Developer** (jednokratna taksa) | objava na Google Play | nema Play Store-a (test APK i dalje radi) | `docs/builds.md` |
 | **Sentry** (besplatan plan: 5.000 grešaka mesečno) | prijave padova i grešaka iz release build-ova | aplikacija radi, ali greške korisnika ne vidi niko | `docs/sentry.md` |
+| **Google Cloud** projekat (besplatan) — samo eksterna | „Nastavi uz Google" | dugme je skriveno, prijava kodom radi | `docs/sign-in.md` |
+| **Apple Developer** — eksterna | „Nastavi uz Apple" (iOS) | dugme je skriveno | `docs/sign-in.md` |
+| **SMTP** za produkciju — eksterna | kodovi za prijavu u prave sandučiće | lokalno kod ide u log API-ja | `api/.env` (`MAIL_*`) |
 
 #### Ažuriranja: OTA i obavezno ažuriranje
 
@@ -227,13 +262,14 @@ kasnije da ih dobije:
   (`npm run update:preview`, `npm run update:production`), svaka varijanta na
   svom kanalu. Isključeno je dok projekat nema Expo nalog. Uz svaku native
   promenu diže se `version` u `app.json`.
-- **Obavezno ažuriranje:** aplikacija starija od `MOBILE_IOS_MINIMUM_VERSION` /
-  `MOBILE_ANDROID_MINIMUM_VERSION` iz `.env` API-ja prikazuje samo „Potrebno je
-  ažuriranje" sa linkom ka prodavnici. Radi bez ikakvog naloga.
+- **Obavezno ažuriranje:** svaka aplikacija ima svoj minimum u `.env` API-ja
+  (`MOBILE_INTERNAL_IOS_MINIMUM_VERSION`, `MOBILE_EXTERNAL_ANDROID_MINIMUM_VERSION`…).
+  Starija verzija prikazuje samo „Potrebno je ažuriranje" sa linkom ka
+  prodavnici. Radi bez ikakvog naloga.
 
-Detalji su u `internal-mobile-app/docs/updates.md`.
+Detalji su u `docs/updates.md` svake aplikacije.
 
-Putanje su u `internal-mobile-app/`. Push je podržan do kraja (backend,
+Putanje su u folderu aplikacije. Push je podržan do kraja (backend,
 aplikacija, testovi), a Sentry je ugrađen i ćuti dok su
 `EXPO_PUBLIC_SENTRY_DSN`, `SENTRY_ORG` i `SENTRY_PROJECT` prazni — oba čekaju
 samo naloge. Tajne (Sentry auth token, Firebase service account, APNs ključ)
@@ -293,7 +329,7 @@ ima svoje kontejnere, svoje volumene i svoju mrežu.
 | --- | --- |
 | `localhost:8000` | Laravel API (`/docs/api`, `/horizon`, `/pulse`) |
 | `localhost:5173` | Vite, frontend |
-| `localhost:8081` | Metro, mobilna aplikacija (`make mobile`) |
+| `localhost:8081` | Metro, mobilna aplikacija (`make internal-app` / `make external-app`, jedna po jedna) |
 | `localhost:5433` | postgres |
 | `localhost:5434` | test baza |
 | `localhost:6379` | redis |
@@ -334,7 +370,9 @@ bazu, pa je `base+6` uvek frontend.
 | `--port-base N` | pomeri portove u blok od deset odavde — za dva projekta uporedo |
 | `--dir PATH` | gde se pravi folder; jače od `$PROJECTS_DIR`, preskače prompt |
 | `--no-infra` | preskoči infra repo — kad projekat ide na server koji ga već vrti |
-| `--no-mobile` | preskoči `internal-mobile-app/` — projekat bez mobilne aplikacije |
+| `--with-internal-app` | dodaj `internal-mobile-app/` — Expo aplikacija za zaposlene |
+| `--with-external-app` | dodaj `external-mobile-app/` — Expo aplikacija za krajnje korisnike |
+| `--no-mobile` | uklonjen: bez gornja dva flaga projekat ionako nema mobilnu aplikaciju (skripta to ispiše) |
 | `--setup` | i sagradi kontejnere, migriraj, instaliraj `node_modules` |
 
 Destinacija se bira na tri nivoa, od jačeg ka slabijem: `--dir PATH` za jedan
