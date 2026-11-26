@@ -754,7 +754,9 @@ Paths and commands in each folder's rules are relative to that folder.
 
 - api: \`make -C api <target>\` (\`make -C api help\` lists them); artisan as
   \`make -C api artisan c="..."\`. The containers must be up: \`make up\`.
-- web: \`cd web && npm ...\`
+- web: \`cd web && npm ...\`; the dev server is \`make web\` here, not
+  \`npm run dev\` -- it runs on this project's port, the only origin the API's
+  CORS allows.
 ${mobile_cmd}
 The workspace \`Makefile\` here starts things: \`make help\` lists \`up\`, \`down\`,
 \`web\`, \`test\`, \`ports\`${mobile_make}.
